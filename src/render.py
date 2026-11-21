@@ -3,6 +3,7 @@
 بايثون خالص: Pillow للرسم، numpy للخلفية، moviepy للتجميع مع ffmpeg.
 """
 
+import glob
 import os
 import shutil
 import tempfile
@@ -11,7 +12,10 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 import arabic_reshaper
-from bidi.algorithm import get_display
+try:
+    from bidi.algorithm import get_display
+except ImportError:  # python-bidi الجديدة نقلتها إلى المستوى الأعلى
+    from bidi import get_display
 
 
 def _shape(text):
@@ -23,8 +27,24 @@ def _find_font(candidates):
     for p in candidates:
         if os.path.exists(p):
             return p
+    # بحث احتياطي: أي خط عربي مثبّت في النظام
+    roots = [
+        "/usr/share/fonts",
+        os.path.expanduser("~/.fonts"),
+        os.path.expanduser("~/.local/share/fonts"),
+    ]
+    keywords = ["amiri", "Amiri", "kacst", "Kacst", "Naskh", "naskh",
+                "Arabic", "arabic", "Scheherazade"]
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        for kw in keywords:
+            for ext in ("ttf", "otf"):
+                hits = glob.glob(os.path.join(root, "**", f"*{kw}*.{ext}"), recursive=True)
+                if hits:
+                    return sorted(hits)[0]
     raise FileNotFoundError(
-        "لم أجد خطًا عربيًا. ثبّت خطًا (مثلًا: sudo apt-get install fonts-amiri) "
+        "لم أجد خطًا عربيًا. ثبّت خطًا (مثلًا: sudo apt-get install fonts-kacst) "
         "أو ضع ملف .ttf في assets/arabic.ttf، ثم حدّث المسار في config.json."
     )
 

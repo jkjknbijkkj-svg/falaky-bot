@@ -14,8 +14,14 @@ jobs:
 
       - name: تثبيت خط عربي + ffmpeg
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq fonts-amiri ffmpeg
+          sudo apt-get update -qq || true
+          sudo apt-get install -y -qq ffmpeg || true
+          sudo apt-get install -y -qq fonts-hosny-amiri || true
+          sudo apt-get install -y -qq fonts-kacst || true
+          sudo apt-get install -y -qq fonts-noto-core || true
+          sudo apt-get install -y -qq fonts-noto || true
+          echo "--- الخطوط العربية المثبتة ---"
+          fc-list | grep -iE "amiri|kacst|naskh|arabic" || echo "تحذير: لم يُعثر على خط عربي"
 
       - uses: actions/setup-python@v5
         with:
