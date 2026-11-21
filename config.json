@@ -1,0 +1,36 @@
+{
+  "channel_name": "فيزياء مبسّطة",
+  "topic_prompt": "حقائق مذهلة ومبسّطة في الفيزياء والفلك، كل حقيقة قصيرة ودقيقة علميًا",
+
+  "video": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "min_duration_seconds": 14
+  },
+
+  "style": {
+    "bg_top": [8, 14, 34],
+    "bg_bottom": [2, 4, 12],
+    "accent": [88, 166, 255],
+    "title_color": [245, 249, 255],
+    "text_color": [206, 220, 240],
+    "font_path_candidates": [
+      "assets/arabic.ttf",
+      "/usr/share/fonts/truetype/amiri/Amiri-Regular.ttf",
+      "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
+      "/usr/share/fonts/truetype/kacst/KacstOne.ttf",
+      "/Library/Fonts/Arial Unicode.ttf",
+      "C:/Windows/Fonts/arial.ttf"
+    ]
+  },
+
+  "voice": {
+    "edge_voice": "ar-EG-SalmaNeural",
+    "rate": "-6%"
+  },
+
+  "gemini": {
+    "model": "gemini-1.5-flash"
+  }
+}

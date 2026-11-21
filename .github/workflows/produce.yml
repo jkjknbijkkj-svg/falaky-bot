@@ -1,0 +1,41 @@
+name: produce-video
+
+# يعمل على خوادم GitHub السحابية — جهازك مطفأ والعمل يستمر.
+on:
+  workflow_dispatch:        # زر تشغيل يدوي
+  schedule:
+    - cron: "17 7 * * *"    # يوميًا الساعة 07:17 بتوقيت UTC (عدّلها كما تشاء)
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: تثبيت خط عربي + ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-amiri ffmpeg
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: تثبيت المكتبات
+        run: pip install -r requirements.txt
+
+      - name: صناعة الفيديو (ونشره إن وُجدت أسرار يوتيوب)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          PUBLISH: ${{ secrets.YT_REFRESH_TOKEN != '' && '1' || '0' }}
+        run: python src/main.py
+
+      - name: حفظ الفيديو كأثر قابل للتنزيل
+        uses: actions/upload-artifact@v4
+        with:
+          name: video
+          path: output/video.mp4
+          retention-days: 7
