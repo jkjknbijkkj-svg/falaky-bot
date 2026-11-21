@@ -2,9 +2,9 @@ name: produce-video
 
 # يعمل على خوادم GitHub السحابية — جهازك مطفأ والعمل يستمر.
 on:
-  workflow_dispatch:        # زر تشغيل يدوي
+  workflow_dispatch:
   schedule:
-    - cron: "17 7 * * *"    # يوميًا الساعة 07:17 بتوقيت UTC (عدّلها كما تشاء)
+    - cron: "17 7 * * *"
 
 jobs:
   build:
@@ -19,9 +19,8 @@ jobs:
           sudo apt-get install -y -qq fonts-hosny-amiri || true
           sudo apt-get install -y -qq fonts-kacst || true
           sudo apt-get install -y -qq fonts-noto-core || true
-          sudo apt-get install -y -qq fonts-noto || true
           echo "--- الخطوط العربية المثبتة ---"
-          fc-list | grep -iE "amiri|kacst|naskh|arabic" || echo "تحذير: لم يُعثر على خط عربي"
+          fc-list | grep -iE "amiri|kacst|naskh|arabic" || echo "تحذير: لا خط عربي"
 
       - uses: actions/setup-python@v5
         with:
@@ -33,6 +32,8 @@ jobs:
       - name: صناعة الفيديو (ونشره إن وُجدت أسرار يوتيوب)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}

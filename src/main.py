@@ -1,8 +1,7 @@
 """
-المنظّم: حقيقة -> صوت -> فيديو -> (اختياريًا) رفع.
-التشغيل:
-  python src/main.py            # يصنع الفيديو فقط (محرّك أولًا — تراه قبل أي نشر)
-  python src/main.py --publish  # يصنع وينشر على يوتيوب (بعد ضبط أسرار YT_*)
+المنظّم: حقيقة -> صوت -> لقطات -> منتاج -> (اختياريًا) رفع.
+  python src/main.py            # يصنع الفيديو فقط
+  python src/main.py --publish  # يصنع وينشر على يوتيوب
 """
 
 import json
@@ -15,6 +14,7 @@ sys.path.insert(0, HERE)
 
 import content
 import voice
+import footage
 import render
 
 
@@ -29,19 +29,21 @@ def main():
     voice_path = os.path.join(out_dir, "voice.mp3")
     video_path = os.path.join(out_dir, "video.mp4")
 
-    print("[1/3] توليد الحقيقة…")
+    print("[1/4] توليد الحقيقة…")
     fact = content.get_fact(cfg)
-    print("      العنوان:", fact["title"])
+    print("      العنوان:", fact["title"], "| كلمات:", fact["keywords"])
 
-    print("[2/3] توليد الصوت…")
+    print("[2/4] توليد الصوت…")
     dur = voice.synth(fact["narration"], voice_path, cfg)
     print("      المدة:", round(dur, 1) if dur else "صامت")
 
-    print("[3/3] بناء الفيديو…")
-    render.build_video(fact, voice_path, dur, cfg, video_path)
+    print("[3/4] جلب اللقطات…")
+    clips = footage.fetch(fact["keywords"], cfg["video"].get("num_clips", 6))
+
+    print("[4/4] المنتاج…")
+    render.build_video(fact, voice_path, dur, clips, cfg, video_path)
     print("      تم:", video_path)
 
-    # نحفظ بيانات الحلقة لاستعمالها في النشر
     meta = {
         "title": f"{fact['title']} | {cfg['channel_name']}",
         "description": fact["narration"] + "\n\n#فيزياء #علوم #فضاء",
@@ -53,10 +55,9 @@ def main():
     if publish:
         print("[+] الرفع إلى يوتيوب…")
         import youtube
-
         youtube.upload(video_path, meta["title"], meta["description"], meta["tags"])
     else:
-        print("[i] لم يُنشر (محرّك فقط). أضف --publish بعد أن تضبط أسرار YT_*.")
+        print("[i] لم يُنشر (محرّك فقط). أضف --publish بعد ضبط أسرار YT_*.")
 
 
 if __name__ == "__main__":

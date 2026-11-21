@@ -4,14 +4,14 @@
 - وإلا يُرجع حقيقة من قائمة احتياطية (حتى يعمل المشروع من أول تشغيل بلا أي مفتاح).
 
 المخرجات دائمًا قاموس:
-  { "title": str, "narration": str, "points": [str, str, ...] }
+  { "title": str, "narration": str, "points": [str,...], "keywords": [str,...] }
+  keywords = كلمات بحث إنجليزية للقطات الفيديو (مصادر الستوك إنجليزية).
 """
 
 import json
 import os
 import random
 
-# حقائق احتياطية مكتوبة يدويًا ومُراجَعة — تضمن تشغيلًا فوريًا بدون مفتاح.
 FALLBACK = [
     {
         "title": "الضوء كسولٌ بمقاييسنا",
@@ -19,8 +19,9 @@ FALLBACK = [
         "points": [
             "المسافة إلى الشمس نحو 150 مليون كيلومتر",
             "سرعة الضوء 300 ألف كيلومتر في الثانية",
-            "لو انطفأت الشمس فجأة لعرفنا ذلك بعد 8 دقائق",
+            "لو انطفأت الشمس لعرفنا بعد 8 دقائق",
         ],
+        "keywords": ["sun space", "sunlight rays", "solar system", "space stars"],
     },
     {
         "title": "لماذا السماء زرقاء؟",
@@ -28,8 +29,9 @@ FALLBACK = [
         "points": [
             "الضوء الأبيض يحوي كل الألوان",
             "الأزرق قصير الموجة فيتبعثر أكثر",
-            "عند الغروب يتبقّى الأحمر الطويل الموجة",
+            "عند الغروب يتبقّى الأحمر الطويل",
         ],
+        "keywords": ["blue sky", "sunset sky", "clouds sky", "sunlight nature"],
     },
     {
         "title": "وزنك يتغيّر مع المكان",
@@ -39,6 +41,7 @@ FALLBACK = [
             "الوزن: قوة الجاذبية على الكتلة",
             "جاذبية القمر سُدس جاذبية الأرض",
         ],
+        "keywords": ["moon surface", "astronaut space", "earth from space", "gravity planet"],
     },
 ]
 
@@ -49,31 +52,28 @@ def _from_gemini(topic_prompt, model):
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
         return None
-
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    )
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     instruction = (
-        "أنت كاتب محتوى علمي عربي دقيق. أعطني حقيقة واحدة حول الموضوع التالي: "
+        "أنت كاتب محتوى علمي عربي دقيق. أعطني حقيقة واحدة حول: "
         f"{topic_prompt}. "
-        "أعد الإجابة بصيغة JSON فقط دون أي نص إضافي، بهذا الشكل بالضبط:\n"
-        '{"title": "عنوان قصير", '
-        '"narration": "فقرة سرد من 2 إلى 4 جمل، دقيقة علميًا وواضحة", '
-        '"points": ["نقطة قصيرة", "نقطة قصيرة", "نقطة قصيرة"]}'
+        "أعد JSON فقط دون أي نص إضافي بهذا الشكل بالضبط:\n"
+        '{"title":"عنوان قصير",'
+        '"narration":"سرد من 2 إلى 4 جمل دقيق علميًا",'
+        '"points":["نقطة قصيرة","نقطة قصيرة","نقطة قصيرة"],'
+        '"keywords":["english search term","english search term","english search term"]}'
+        "\nحيث keywords كلمات إنجليزية للبحث عن لقطات فيديو ملائمة."
     )
     body = {"contents": [{"parts": [{"text": instruction}]}]}
     try:
-        r = requests.post(
-            url, params={"key": key}, json=body, timeout=60
-        )
+        r = requests.post(url, params={"key": key}, json=body, timeout=60)
         r.raise_for_status()
         text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-        # تنظيف أسوار الكود إن وُجدت
         text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         data = json.loads(text)
         assert data.get("title") and data.get("narration") and data.get("points")
+        data.setdefault("keywords", [data["title"]])
         return data
-    except Exception as e:  # أي فشل -> نرجع None لنستعمل الاحتياطي
+    except Exception as e:
         print(f"[content] تعذّر توليد الحقيقة من Gemini ({e})؛ سأستعمل الاحتياطي.")
         return None
 
@@ -82,6 +82,6 @@ def get_fact(cfg):
     data = _from_gemini(cfg["topic_prompt"], cfg["gemini"]["model"])
     if data is None:
         data = random.choice(FALLBACK)
-    # تقييد عدد النقاط حتى لا تزدحم الشاشة
     data["points"] = data["points"][:4]
+    data["keywords"] = data.get("keywords", [data["title"]])[:5]
     return data
