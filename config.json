@@ -52,6 +52,12 @@
     "manim_timeout_seconds": 2400
   },
 
+  "youtube": {
+    "_privacy": "private = خاص لا يراه أحد | unlisted = بالرابط فقط | public = منشور للجميع",
+    "privacy": "private",
+    "category_id": "28"
+  },
+
   "footage": {
     "enabled": false,
     "max_clips": 6,
