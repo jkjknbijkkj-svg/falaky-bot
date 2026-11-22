@@ -1,52 +1,132 @@
 name: produce-video
 
-# يعمل على خوادم GitHub السحابية — جهازك مطفأ والعمل يستمر.
-# الريبو عام، فدقائق التشغيل مجانية بلا سقف.
+# ثلاث مراحل: كتابة ← رسم متوازٍ ← تركيب.
+# الرسم المتوازي هو ما يجعل حلقة ٢٠ دقيقة ممكنة: كل قسم يُرسم في خادم مستقلّ،
+# فيصير زمن الانتظار بطول أطول قسم لا بمجموع الأقسام.
 on:
   workflow_dispatch:
   schedule:
     # حلقة أسبوعية: الجودة قبل الكمّية.
     - cron: "17 7 * * 3"
 
+env:
+  SYS_DEPS: >-
+    ffmpeg pkg-config python3-dev libcairo2-dev libpango1.0-dev
+    fonts-hosny-amiri fonts-noto-core fonts-kacst
+
 jobs:
-  build:
+  # ------------------------------------------------ ١) السكريبت والتعليق
+  script:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 45
+    outputs:
+      indices: ${{ steps.plan.outputs.indices }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: تثبيت متطلّبات النظام (Manim + ffmpeg + خطوط عربية)
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq \
-            ffmpeg pkg-config python3-dev \
-            libcairo2-dev libpango1.0-dev \
-            fonts-hosny-amiri fonts-noto-core fonts-kacst
-          echo "--- الخطوط العربية ---"
-          fc-list | grep -iE "amiri|kacst|naskh" || echo "تحذير: لا خط عربي"
+      - name: متطلّبات النظام
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq $SYS_DEPS
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
 
-      - name: تثبيت المكتبات
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      - run: pip install -r requirements.txt
 
-      - name: صناعة الفيديو (ونشره إن وُجدت أسرار يوتيوب)
+      - name: كتابة السكريبت وتوليد التعليق
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+        run: python src/main.py --stage script
+
+      - name: تحديد قائمة المشاهد
+        id: plan
+        run: echo "indices=$(tr -d '\n ' < output/work/indices.json)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stage1
+          path: output
+          retention-days: 7
+
+  # ------------------------------------------------ ٢) رسم المشاهد بالتوازي
+  render:
+    needs: script
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        index: ${{ fromJSON(needs.script.outputs.indices) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: متطلّبات النظام
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq $SYS_DEPS
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: stage1
+          path: output
+
+      - name: رسم المشهد ${{ matrix.index }}
+        run: python src/main.py --stage render --index "${{ matrix.index }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seg-${{ matrix.index }}
+          path: output/work/seg_${{ matrix.index }}.mp4
+          retention-days: 3
+
+  # ------------------------------------------------ ٣) التركيب والنشر
+  assemble:
+    needs: render
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: متطلّبات النظام
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq $SYS_DEPS
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: stage1
+          path: output
+
+      - name: تنزيل كل المشاهد المرسومة
+        uses: actions/download-artifact@v4
+        with:
+          pattern: seg-*
+          merge-multiple: true
+          path: output/work
+
+      - name: التركيب (والنشر إن وُجدت أسرار يوتيوب)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
           PUBLISH: ${{ secrets.YT_REFRESH_TOKEN != '' && '1' || '0' }}
-        run: python src/main.py
+        run: python src/main.py --stage assemble
 
-      - name: حفظ الفيديو والسكريبت كأثر قابل للتنزيل
+      - name: حفظ الحلقة
         if: always()
         uses: actions/upload-artifact@v4
         with:

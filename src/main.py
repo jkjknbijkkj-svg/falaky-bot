@@ -1,10 +1,17 @@
 """
-المنظّم: سكريبت -> تعليق مقسّم -> خط زمني -> مشاهد Manim -> تركيب -> رفع.
+المنظّم — يعمل على مراحل حتى يمكن رسم الأقسام بالتوازي.
 
-    python src/main.py            # يصنع الفيديو فقط
-    python src/main.py --publish  # يصنع وينشر على يوتيوب
+    python src/main.py                      # كل المراحل بالتتابع (محليًا)
+    python src/main.py --stage script       # السكريبت + التعليق + الخط الزمني
+    python src/main.py --stage render --index 3
+    python src/main.py --stage render --index intro
+    python src/main.py --stage assemble     # التركيب (و--publish للرفع)
+
+المرحلة الأولى تكتب output/work/spec.json و spans.json و indices.json،
+ثم يُرسم كل قسم في وظيفة مستقلّة، وأخيرًا تجمعها مرحلة التركيب.
 """
 
+import argparse
 import json
 import os
 import sys
@@ -19,9 +26,29 @@ import audio
 import visuals
 import render
 
+OUT = os.path.join(ROOT, "output")
+WORK = os.path.join(OUT, "work")
+
+
+def load_cfg():
+    with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _write(path, data):
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, ensure_ascii=False, indent=1)
+
+
+def _read(path):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+# ------------------------------------------------------------ المرحلة الأولى
 
 def build_spec(script, spans, cfg):
-    """ملفّ يقرأه Manim: التصميم + محتوى كل مشهد + مدّته الدقيقة."""
+    """مواصفات يقرأها Manim: التصميم + محتوى كل مشهد + مدّته الدقيقة."""
     # مدّة كل مشهد = من بدايته إلى بداية ما بعده (فيبتلع الفاصل)
     durations = []
     for i, s in enumerate(spans):
@@ -30,76 +57,118 @@ def build_spec(script, spans, cfg):
         else:
             durations.append(round(s["duration"], 3))
 
-    sections = []
-    for i, sec in enumerate(script["sections"]):
-        sections.append({
-            "heading": sec["heading"],
-            "visual": sec["visual"],
-            "duration": durations[i + 1],      # +1 لأن أوّل جزء هو الخطّاف
-        })
+    sections = [{
+        "heading": sec["heading"],
+        "visual": sec["visual"],
+        "duration": durations[i + 1],      # +1 لأن أوّل جزء هو الخطّاف
+    } for i, sec in enumerate(script["sections"])]
 
     return {
         "design": cfg["design"],
-        "intro": {
-            "items": [script["title"], cfg["channel_name"]],
-            "caption": "",
-            "duration": durations[0],
-        },
+        "intro": {"items": [script["title"], cfg["channel_name"]],
+                  "caption": "", "duration": durations[0]},
         "sections": sections,
-        "outro": {
-            "items": [cfg["channel_name"], "تابِع لمزيد من الحلقات"],
-            "caption": "",
-            "duration": durations[-1],
-        },
+        "outro": {"items": [cfg["channel_name"], "تابِع لمزيد من الحلقات"],
+                  "caption": "", "duration": durations[-1]},
     }
 
 
-def main():
-    publish = "--publish" in sys.argv or os.environ.get("PUBLISH") == "1"
+def stage_script(cfg):
+    os.makedirs(WORK, exist_ok=True)
 
-    with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as fh:
-        cfg = json.load(fh)
-
-    out_dir = os.path.join(ROOT, "output")
-    work_dir = os.path.join(out_dir, "work")
-    os.makedirs(work_dir, exist_ok=True)
-    video_path = os.path.join(out_dir, "video.mp4")
-
-    print("[1/5] كتابة السكريبت…")
+    print("[script] كتابة السكريبت…")
     script = content.build_script(cfg)
-    print(f"      {script['title']} — {len(script['sections'])} أقسام")
+    words = sum(len(s["narration"].split()) for s in script["sections"])
+    print(f"[script] {script['title']} — {len(script['sections'])} أقسام، "
+          f"{words} كلمة تقريبًا")
 
-    print("[2/5] التعليق الصوتي (جزء لكل مشهد)…")
-    parts = voice.synth_script(script, cfg, work_dir)
+    print("[script] التعليق الصوتي (جزء لكل مشهد)…")
+    parts = voice.synth_script(script, cfg, WORK)
 
     gap = float(cfg["voice"].get("section_gap_seconds", 0.5))
     spans, total = audio.layout(parts, gap)
-    print(f"      الطول الكلّي: {total:.1f} ثانية ({total/60:.1f} دقيقة)")
+    print(f"[script] الطول الكلّي: {total:.1f} ثانية ({total/60:.1f} دقيقة)")
 
-    print("[3/5] تجهيز مواصفات المشاهد…")
     spec = build_spec(script, spans, cfg)
-    spec_path = os.path.join(work_dir, "spec.json")
-    with open(spec_path, "w", encoding="utf-8") as fh:
-        json.dump(spec, fh, ensure_ascii=False, indent=1)
+    _write(os.path.join(WORK, "spec.json"), spec)
+    _write(os.path.join(WORK, "spans.json"), {"spans": spans, "total": total})
+    _write(os.path.join(WORK, "indices.json"), visuals.order_of(spec))
+    _write(os.path.join(OUT, "script.json"), script)
+    _write(os.path.join(OUT, "meta.json"), content.build_meta(script, cfg))
+    print(f"[script] {len(visuals.order_of(spec))} مشهدًا جاهزًا للرسم.")
+    return spec
 
-    print("[4/5] رسم المشاهد…")
-    segments = visuals.render_all(spec, spec_path, cfg, work_dir)
 
-    print("[5/5] التركيب النهائي…")
+# ------------------------------------------------------------ مرحلة الرسم
+
+def stage_render(cfg, index):
+    spec = _read(os.path.join(WORK, "spec.json"))
+    spec_path = os.path.join(WORK, "spec.json")
+    visuals.render_one(spec, spec_path, cfg, WORK, index)
+
+
+# ---------------------------------------------------------- مرحلة التركيب
+
+def stage_assemble(cfg, publish):
+    spec = _read(os.path.join(WORK, "spec.json"))
+    sp = _read(os.path.join(WORK, "spans.json"))
+    spans, total = sp["spans"], sp["total"]
+
+    segments = []
+    for idx in visuals.order_of(spec):
+        path = os.path.join(WORK, f"{visuals.seg_name(idx)}.mp4")
+        if os.path.exists(path):
+            segments.append(path)
+        else:
+            print(f"[assemble] ناقص: {path} — سأرسمه الآن.")
+            segments.append(visuals.render_one(
+                spec, os.path.join(WORK, "spec.json"), cfg, WORK, idx))
+
+    video_path = os.path.join(OUT, "video.mp4")
     render.assemble(segments, spans, total, cfg, video_path)
 
-    meta = content.build_meta(script, cfg)
-    with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as fh:
-        json.dump(meta, fh, ensure_ascii=False, indent=1)
-    with open(os.path.join(out_dir, "script.json"), "w", encoding="utf-8") as fh:
-        json.dump(script, fh, ensure_ascii=False, indent=1)
+    meta = _read(os.path.join(OUT, "meta.json"))
+
+    # حماية: الحلقة الاحتياطية أقصر من هدف القناة، فلا تُنشر تلقائيًا.
+    script = _read(os.path.join(OUT, "script.json"))
+    if publish and script.get("source") == "fallback":
+        print("[assemble] السكريبت احتياطي (تعذّر Gemini) — أوقفت النشر. "
+              "الفيديو محفوظ كأثر للمراجعة اليدوية.")
+        publish = False
 
     if publish:
-        print("[+] الرفع إلى يوتيوب…")
+        print("[assemble] الرفع إلى يوتيوب…")
         import youtube
         youtube.upload(video_path, meta["title"], meta["description"], meta["tags"])
     else:
-        print("[i] لم يُنشر. أضف --publish بعد ضبط أسرار YT_*.")
+        print("[assemble] لم يُنشر. أضف --publish بعد ضبط أسرار YT_*.")
+
+
+# ------------------------------------------------------------------ المدخل
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--stage", choices=["script", "render", "assemble", "all"],
+                    default="all")
+    ap.add_argument("--index", default="0")
+    ap.add_argument("--publish", action="store_true")
+    args = ap.parse_args()
+
+    publish = args.publish or os.environ.get("PUBLISH") == "1"
+    cfg = load_cfg()
+    os.makedirs(WORK, exist_ok=True)
+
+    if args.stage == "script":
+        stage_script(cfg)
+    elif args.stage == "render":
+        stage_render(cfg, args.index)
+    elif args.stage == "assemble":
+        stage_assemble(cfg, publish)
+    else:
+        spec = stage_script(cfg)
+        for idx in visuals.order_of(spec):
+            stage_render(cfg, idx)
+        stage_assemble(cfg, publish)
 
 
 if __name__ == "__main__":
