@@ -2,7 +2,7 @@
 المنظّم — يعمل على مراحل حتى يمكن رسم الأقسام بالتوازي.
 
     python src/main.py                      # كل المراحل بالتتابع (محليًا)
-    python src/main.py --stage script       # السكريبت + التعليق + الخط الزمني
+    python src/main.py --stage script       # السكريبت + الصور + التعليق
     python src/main.py --stage render --index 3
     python src/main.py --stage render --index intro
     python src/main.py --stage assemble     # التركيب (و--publish للرفع)
@@ -25,6 +25,7 @@ import voice
 import audio
 import visuals
 import render
+import portraits
 
 OUT = os.path.join(ROOT, "output")
 WORK = os.path.join(OUT, "work")
@@ -98,6 +99,9 @@ def stage_script(cfg):
     print(f"[script] {script['title']} — {len(script['sections'])} أقسام، "
           f"{words} كلمة تقريبًا")
 
+    print("[script] صور العلماء (ويكيميديا، ترخيص حرّ فقط)…")
+    portraits.attach(script, cfg, WORK)
+
     print("[script] التعليق الصوتي (جزء لكل مشهد)…")
     parts = voice.synth_script(script, cfg, WORK)
 
@@ -154,6 +158,10 @@ def stage_assemble(cfg, publish):
         f"- **الطول:** {total / 60:.1f} دقيقة",
         f"- **مصدر السكريبت:** {'Gemini' if source == 'gemini' else 'احتياطي'}",
     ]
+
+    shots = sum(1 for s in script.get("sections", []) if s.get("portrait_credit"))
+    if shots:
+        report.append(f"- **صور علماء حرّة:** {shots} (المصادر في الوصف)")
 
     blocked = None
     forced_private = False
