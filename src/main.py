@@ -155,15 +155,21 @@ def stage_assemble(cfg, publish):
         f"- **مصدر السكريبت:** {'Gemini' if source == 'gemini' else 'احتياطي'}",
     ]
 
-    # حماية: الحلقة الاحتياطية أقصر من هدف القناة، فلا تُنشر تلقائيًا.
     blocked = None
+    forced_private = False
+
     if not publish:
-        blocked = ("سرّ `YT_REFRESH_TOKEN` غير مضبوط"
+        blocked = ("سرّ `YT_REFRESH_TOKEN` غير مضبوط في GitHub Secrets"
                    if not os.environ.get("YT_REFRESH_TOKEN")
                    else "النشر مُعطّل (PUBLISH=0)")
     elif source == "fallback":
-        blocked = ("السكريبت احتياطي (تعذّر Gemini) وأقصر من هدف القناة — "
-                   "أوقفت النشر عمدًا")
+        # الحلقة الاحتياطية أقصر من هدف القناة. لا نمنع رفعها — نمنع فقط
+        # أن تصير عامّة. هكذا تراها وتحكم عليها بنفسك بدل أن تختفي.
+        yt = dict(cfg.get("youtube", {}))
+        if str(yt.get("privacy", "private")).lower() == "public":
+            yt["privacy"] = "private"
+            cfg = {**cfg, "youtube": yt}
+            forced_private = True
 
     if blocked:
         report.append(f"- **لم يُنشر:** {blocked}.")
@@ -175,6 +181,9 @@ def stage_assemble(cfg, publish):
                                  meta["tags"], cfg)
             report.append(f"- **رُفع:** {res['url']}")
             report.append(f"- **درجة الظهور:** `{res['privacy']}` — {res['note']}.")
+            if forced_private:
+                report.append("- خُفّضت من `public` تلقائيًا لأن السكريبت احتياطي "
+                              "(حلقة ضعيفة لا تُنشر للجمهور).")
             if res["privacy"] == "private":
                 report.append("- لتغييرها: `youtube.privacy` في `config.json` "
                               "← `unlisted` أو `public`.")
