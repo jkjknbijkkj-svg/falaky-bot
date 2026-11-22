@@ -421,12 +421,20 @@ def build_script(cfg):
 
 
 def build_meta(script, cfg):
-    """وصف ووسوم يوتيوب، مع فهرس الأقسام."""
+    """وصف ووسوم يوتيوب، مع فهرس الأقسام ونسب الصور."""
     body = [script["hook"], "", "— محاور الحلقة —"]
     for s in script["sections"]:
         if s["heading"]:
             body.append(f"• {s['heading']}")
-    body += ["", script["outro"], "", "#فيزياء #علوم #تاريخ_العلوم #إلكترونيات #تعليم"]
+    body += ["", script["outro"]]
+
+    # نسب الصور إلزامي لتراخيص المشاع الإبداعي، ومن حسن الأدب في الملك العام
+    credits = [s["portrait_credit"] for s in script["sections"]
+               if s.get("portrait_credit")]
+    if credits:
+        body += ["", "— مصادر الصور —"] + [f"• {c}" for c in credits]
+
+    body += ["", "#فيزياء #علوم #تاريخ_العلوم #إلكترونيات #تعليم"]
     return {
         "title": f"{script['title']} | {cfg['channel_name']}",
         "description": "\n".join(body).strip(),
