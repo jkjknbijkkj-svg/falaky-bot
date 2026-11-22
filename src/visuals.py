@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 
+import compat  # noqa: F401  — يجب أن يسبق أي استيراد لـmoviepy
 import design
 
 
