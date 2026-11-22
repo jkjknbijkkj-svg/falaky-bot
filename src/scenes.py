@@ -2,7 +2,7 @@
 مكتبة مشاهد Manim — قلب الترقية البصرية.
 
 بدل نصّ مرميّ على خلفية متدرّجة، كل قسم من الحلقة يصير مشهدًا مرسومًا يشرح
-الفكرة: سلسلة مراحل، مقارنة، موجة، ذرّة، رقم، خط زمني، بطاقة عال攎م، أو اقتباس.
+الفكرة: سلسلة مراحل، مقارنة، موجة، ذرّة، رقم، خط زمني، بطاقة عالِم، أو اقتباس.
 
 يُستدعى من visuals.py عبر سطر أوامر manim، ويقرأ:
   FALAKY_SPEC   مسار ملف JSON فيه مواصفات المشاهد + مدّة كل قسم
@@ -43,13 +43,45 @@ config.background_color = BG
 
 
 def _txt(s, size=32, color=None, weight="NORMAL"):
-    return Text(str(s), font=FONT, font_size=size,
+    """Manim لا يرسم نصًّا فارغًا، فنعيد مجموعة فارغة بدل أن ينهار المشهد."""
+    s = str(s).strip()
+    if not s:
+        return VGroup()
+    return Text(s, font=FONT, font_size=size,
                 color=color or TEXT, weight=weight)
+
+
+def _fit_w(m, w):
+    """تصغير آمن: لا نلمس مجموعة فارغة (عرضها صفر) فنتجنّب القسمة على صفر."""
+    if w > 0 and getattr(m, "width", 0) > 0:
+        m.scale_to_fit_width(w)
+    return m
 
 
 def _split(raw, fallback="…"):
     parts = [p.strip() for p in str(raw).split("|") if p.strip()]
     return parts or [fallback]
+
+
+def _alive(m):
+    return getattr(m, "width", 0) > 0 or getattr(m, "height", 0) > 0
+
+
+def _stack(mobs, direction=DOWN, buff=0.4, aligned_edge=None):
+    """يرصّ العناصر غير الفارغة فقط — عنصر فارغ يكسر arrange في Manim."""
+    live = [m for m in mobs if _alive(m)]
+    g = VGroup(*live)
+    if live:
+        if aligned_edge is None:
+            g.arrange(direction, buff=buff)
+        else:
+            g.arrange(direction, buff=buff, aligned_edge=aligned_edge)
+    return g
+
+
+def _texts(items, size, color=None):
+    """مجموعة نصوص بعد إسقاط الفارغ منها."""
+    return VGroup(*[_txt(i, size, color) for i in items if str(i).strip()])
 
 
 class _Base(Scene):
@@ -108,8 +140,9 @@ class _Flow(_Base):
             box = RoundedRectangle(corner_radius=0.16, width=box_w, height=1.5,
                                    stroke_color=ACCENT, stroke_width=2.5,
                                    fill_color=SURFACE, fill_opacity=0.95)
-            label = _txt(it, 24).scale_to_fit_width(min(box_w - 0.3, box_w * 0.86))
-            label.move_to(box.get_center())
+            label = _fit_w(_txt(it, 24), min(box_w - 0.3, box_w * 0.86))
+            if _alive(label):
+                label.move_to(box.get_center())
             boxes.add(VGroup(box, label))
 
         boxes.arrange(LEFT, buff=0.62)          # العنصر الأول إلى اليمين
@@ -139,16 +172,20 @@ class _Bullets(_Base):
     def build(self, items, total):
         rows = VGroup()
         for it in items:
+            if not str(it).strip():
+                continue
             dot = Circle(radius=0.11, stroke_width=0,
                          fill_color=ACCENT_W, fill_opacity=1)
-            row = VGroup(_txt(it, 32), dot).arrange(RIGHT, buff=0.35)
-            rows.add(row)
+            rows.add(_stack([_txt(it, 32), dot], RIGHT, 0.35))
+        if not rows.submobjects:
+            self.finish(total)
+            return
         rows.arrange(DOWN, buff=0.62, aligned_edge=RIGHT)
         rows.move_to(ORIGIN + UP * 0.1).to_edge(RIGHT, buff=1.4)
         if rows.height > 4.6:
             rows.scale_to_fit_height(4.6)
 
-        step = max((total - 0.6) / max(len(items), 1), 0.4)
+        step = max((total - 0.6) / max(len(rows.submobjects), 1), 0.4)
         for row in rows:
             self.play_t(FadeIn(row, shift=LEFT * 0.4), run_time=min(0.5, step * 0.5))
             self.wait_t(max(step - 0.5, 0.05))
@@ -168,11 +205,11 @@ class _Compare(_Base):
                                      stroke_color=col, stroke_width=2.5,
                                      fill_color=SURFACE, fill_opacity=0.9)
             head = _txt(parts[0], 34, col)
-            lines = VGroup(*[_txt(p, 26, MUTED) for p in parts[1:]])
-            body = VGroup(head, *lines).arrange(DOWN, buff=0.42)
-            if body.width > 4.8:
-                body.scale_to_fit_width(4.8)
-            body.move_to(panel.get_center())
+            lines = _texts(parts[1:], 26, MUTED)
+            body = _stack([head, *lines], DOWN, 0.42)
+            _fit_w(body, 4.8)
+            if _alive(body):
+                body.move_to(panel.get_center())
             panels.add(VGroup(panel, body))
 
         panels.arrange(LEFT, buff=0.8).move_to(ORIGIN + UP * 0.15)
@@ -205,10 +242,10 @@ class _Wave(_Base):
         wave = always_redraw(make_wave)
         self.add(axis, wave)
 
-        labels = VGroup(*[_txt(i, 26, MUTED) for i in items[:3]])
-        labels.arrange(LEFT, buff=1.0).next_to(axis, DOWN, buff=1.35)
-
-        self.play_t(FadeIn(labels), run_time=0.6)
+        labels = _stack(_texts(items[:3], 26, MUTED), LEFT, 1.0)
+        if _alive(labels):
+            labels.next_to(axis, DOWN, buff=1.35)
+            self.play_t(FadeIn(labels), run_time=0.6)
         remaining = max(total - self.t_used - 0.1, 0.4)
         self.play_t(tracker.animate.set_value(remaining * 3.4),
                     run_time=remaining, rate_func=rate_functions.linear)
@@ -243,12 +280,13 @@ class _Orbit(_Base):
             electron(2.3, -0.72, PI / 2),
         )
 
-        labels = VGroup(*[_txt(i, 26, MUTED) for i in items[:3]])
-        labels.arrange(LEFT, buff=0.9).to_edge(DOWN, buff=1.5)
+        labels = _stack(_texts(items[:3], 26, MUTED), LEFT, 0.9)
 
         self.play_t(GrowFromCenter(nucleus), Create(rings), run_time=0.7)
         self.add(electrons)
-        self.play_t(FadeIn(labels), run_time=0.5)
+        if _alive(labels):
+            labels.to_edge(DOWN, buff=1.5)
+            self.play_t(FadeIn(labels), run_time=0.5)
         remaining = max(total - self.t_used - 0.1, 0.4)
         self.play_t(tracker.animate.set_value(remaining * 2.0),
                     run_time=remaining, rate_func=rate_functions.linear)
@@ -259,15 +297,17 @@ class _Stat(_Base):
     """رقم واحد كبير + سطرا شرح."""
 
     def build(self, items, total):
-        items = (list(items) + ["", ""])[:3]
-        big = _txt(items[0], 130, ACCENT_W)
-        l1 = _txt(items[1], 36)
-        l2 = _txt(items[2], 28, MUTED)
-        VGroup(big, l1, l2).arrange(DOWN, buff=0.45).move_to(ORIGIN + UP * 0.2)
+        vals = [str(i).strip() for i in items if str(i).strip()][:3]
+        vals += [""] * (3 - len(vals))
+        big = _txt(vals[0] or "—", 130, ACCENT_W)
+        l1 = _txt(vals[1], 36)
+        l2 = _txt(vals[2], 28, MUTED)
+        _stack([big, l1, l2], DOWN, 0.45).move_to(ORIGIN + UP * 0.2)
 
         self.play_t(GrowFromCenter(big), run_time=0.8)
-        self.play_t(FadeIn(l1, shift=UP * 0.2), run_time=0.5)
-        self.play_t(FadeIn(l2, shift=UP * 0.2), run_time=0.45)
+        for m, rt in ((l1, 0.5), (l2, 0.45)):
+            if _alive(m):
+                self.play_t(FadeIn(m, shift=UP * 0.2), run_time=rt)
         self.finish(total)
 
 
@@ -294,28 +334,30 @@ class _Timeline(_Base):
                           fill_color=BG, fill_opacity=1).move_to(pos)
             y_lbl = _txt(year, 30, ACCENT_W).next_to(node, UP, buff=0.3)
             e_lbl = _txt(event, 23, TEXT)
-            if e_lbl.width > 3.0:
-                e_lbl.scale_to_fit_width(3.0)
-            e_lbl.next_to(node, DOWN, buff=0.35)
-            # نزيح بالتناوب حتى لا تتلامس النصوص
-            if i % 2:
-                e_lbl.shift(DOWN * 0.75)
-                self.add(Line(node.get_bottom(), e_lbl.get_top(),
-                              stroke_width=1.5, color=MUTED))
+            if _alive(e_lbl):
+                _fit_w(e_lbl, 3.0)
+                e_lbl.next_to(node, DOWN, buff=0.35)
+                # نزيح بالتناوب حتى لا تتلامس النصوص
+                if i % 2:
+                    e_lbl.shift(DOWN * 0.75)
+                    self.add(Line(node.get_bottom(), e_lbl.get_top(),
+                                  stroke_width=1.5, color=MUTED))
 
             self.play_t(GrowFromCenter(node), FadeIn(y_lbl, shift=DOWN * 0.15),
                         run_time=min(0.5, step * 0.45))
-            self.play_t(FadeIn(e_lbl), run_time=min(0.35, step * 0.3))
+            if _alive(e_lbl):
+                self.play_t(FadeIn(e_lbl), run_time=min(0.35, step * 0.3))
             self.wait_t(max(step - 0.85, 0.05))
         self.finish(total)
 
 
 class _Profile(_Base):
-    """بطاقة عال攎م: الاسم، سنوات حياته، وإسهامه. بلا صور — هوية خطّية فقط."""
+    """بطاقة عالِم: الاسم، سنوات حياته، وإسهامه. بلا صور — هوية خطّية فقط."""
 
     def build(self, items, total):
-        items = (list(items) + ["", "", ""])[:3]
-        name, years, deed = items[0], items[1], items[2]
+        vals = [str(i).strip() for i in items if str(i).strip()][:3]
+        vals += [""] * (3 - len(vals))
+        name, years, deed = vals[0], vals[1], vals[2]
 
         panel = RoundedRectangle(corner_radius=0.25, width=9.4, height=4.2,
                                  stroke_color=ACCENT, stroke_width=2.5,
@@ -325,24 +367,23 @@ class _Profile(_Base):
         monogram = Circle(radius=0.72, stroke_color=ACCENT_W, stroke_width=3,
                           fill_color=BG, fill_opacity=1)
         badge = VGroup(monogram,
-                       _txt(str(name)[:1], 52, ACCENT_W).move_to(monogram.get_center()))
+                       _txt(name[:1] or "؟", 52, ACCENT_W).move_to(monogram.get_center()))
 
-        n_lbl = _txt(name, 46, TEXT)
+        n_lbl = _fit_w(_txt(name, 46, TEXT), 6.6)
         y_lbl = _txt(years, 30, ACCENT_W)
-        d_lbl = _txt(deed, 26, MUTED)
-        for m in (n_lbl, d_lbl):
-            if m.width > 6.6:
-                m.scale_to_fit_width(6.6)
-        info = VGroup(n_lbl, y_lbl, d_lbl).arrange(DOWN, buff=0.34,
-                                                   aligned_edge=RIGHT)
+        d_lbl = _fit_w(_txt(deed, 26, MUTED), 6.6)
+        info = _stack([n_lbl, y_lbl, d_lbl], DOWN, 0.34, aligned_edge=RIGHT)
 
-        VGroup(info, badge).arrange(LEFT, buff=0.75).move_to(panel.get_center())
+        _stack([info, badge], LEFT, 0.75).move_to(panel.get_center())
 
         self.play_t(FadeIn(panel, shift=UP * 0.2), run_time=0.6)
         self.play_t(GrowFromCenter(badge), run_time=0.5)
-        self.play_t(FadeIn(n_lbl, shift=LEFT * 0.3), run_time=0.5)
-        self.play_t(FadeIn(y_lbl), run_time=0.4)
-        self.play_t(FadeIn(d_lbl), run_time=0.45)
+        for m, rt, sh in ((n_lbl, 0.5, LEFT * 0.3), (y_lbl, 0.4, None),
+                          (d_lbl, 0.45, None)):
+            if not _alive(m):
+                continue
+            self.play_t(FadeIn(m, shift=sh) if sh is not None else FadeIn(m),
+                        run_time=rt)
         self.finish(total)
 
 
@@ -350,21 +391,21 @@ class _Quote(_Base):
     """اقتباس قصير مع قائله."""
 
     def build(self, items, total):
-        items = (list(items) + ["", ""])[:2]
+        vals = [str(i).strip() for i in items if str(i).strip()][:2]
+        vals += [""] * (2 - len(vals))
         mark = _txt("”", 110, ACCENT)
-        body = _txt(items[0], 38, TEXT)
-        if body.width > config.frame_width - 3.0:
-            body.scale_to_fit_width(config.frame_width - 3.0)
+        body = _fit_w(_txt(vals[0], 38, TEXT), config.frame_width - 3.0)
         rule = Line(LEFT * 1.4, RIGHT * 1.4, stroke_width=3, color=ACCENT_W)
-        who = _txt(items[1], 28, MUTED)
+        who = _txt(vals[1], 28, MUTED)
 
-        VGroup(mark, body, rule, who).arrange(DOWN, buff=0.42)\
-            .move_to(ORIGIN + UP * 0.1)
+        _stack([mark, body, rule, who], DOWN, 0.42).move_to(ORIGIN + UP * 0.1)
 
         self.play_t(FadeIn(mark), run_time=0.5)
-        self.play_t(FadeIn(body, shift=UP * 0.25), run_time=0.8)
+        if _alive(body):
+            self.play_t(FadeIn(body, shift=UP * 0.25), run_time=0.8)
         self.play_t(Create(rule), run_time=0.4)
-        self.play_t(FadeIn(who), run_time=0.45)
+        if _alive(who):
+            self.play_t(FadeIn(who), run_time=0.45)
         self.finish(total)
 
 
@@ -372,16 +413,18 @@ class _Title(_Base):
     """بطاقة العنوان — هوية ثابتة لكل حلقة."""
 
     def build(self, items, total):
-        title = _txt(items[0] if items else "", 66, TEXT)
-        if title.width > config.frame_width - 2.0:
-            title.scale_to_fit_width(config.frame_width - 2.0)
+        vals = [str(i).strip() for i in items if str(i).strip()]
+        title = _fit_w(_txt(vals[0] if vals else "", 66, TEXT),
+                       config.frame_width - 2.0)
         rule = Line(LEFT * 2.2, RIGHT * 2.2, stroke_width=4, color=ACCENT_W)
-        sub = _txt(items[1] if len(items) > 1 else "", 30, MUTED)
-        VGroup(title, rule, sub).arrange(DOWN, buff=0.5).move_to(ORIGIN)
+        sub = _txt(vals[1] if len(vals) > 1 else "", 30, MUTED)
+        _stack([title, rule, sub], DOWN, 0.5).move_to(ORIGIN)
 
-        self.play_t(FadeIn(title, shift=UP * 0.3), run_time=0.9)
+        if _alive(title):
+            self.play_t(FadeIn(title, shift=UP * 0.3), run_time=0.9)
         self.play_t(Create(rule), run_time=0.5)
-        self.play_t(FadeIn(sub), run_time=0.5)
+        if _alive(sub):
+            self.play_t(FadeIn(sub), run_time=0.5)
         self.finish(total)
 
 
