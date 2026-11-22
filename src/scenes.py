@@ -1,11 +1,11 @@
 """
-مكتبة مشاهد Manim — هذا هو قلب الترقية البصرية.
+مكتبة مشاهد Manim — قلب الترقية البصرية.
 
-بدل نصّ مرميًا على خلفية متدرّجة، كل قسم من الحلقة يصير مشهدًا مرسومًا
-يشرح الفكرة: سلسلة مراحل، أو مقارنة، أو موجة، أو ذرّة، أو رقم كبير.
+بدل نصّ مرميّ على خلفية متدرّجة، كل قسم من الحلقة يصير مشهدًا مرسومًا يشرح
+الفكرة: سلسلة مراحل، مقارنة، موجة، ذرّة، رقم، خط زمني، بطاقة عال攎م، أو اقتباس.
 
 يُستدعى من visuals.py عبر سطر أوامر manim، ويقرأ:
-  FALAKY_SPEC   مسار ملف JSON فيه السكريبت الكامل + مدّة كل قسم
+  FALAKY_SPEC   مسار ملف JSON فيه مواصفات المشاهد + مدّة كل قسم
   FALAKY_INDEX  رقم القسم المطلوب رسمه (أو "intro" / "outro")
 
 كل مشهد يلتزم بمدّة القسم بالضبط حتى يتزامن مع التعليق الصوتي.
@@ -47,23 +47,27 @@ def _txt(s, size=32, color=None, weight="NORMAL"):
                 color=color or TEXT, weight=weight)
 
 
+def _split(raw, fallback="…"):
+    parts = [p.strip() for p in str(raw).split("|") if p.strip()]
+    return parts or [fallback]
+
+
 class _Base(Scene):
     """أساس مشترك: خلفية موحّدة، عنوان ثابت، شريط سفلي، وضبط المدّة."""
 
     def setup_stage(self, heading="", caption=""):
         # توهّج خفيف يكسر جمود الخلفية المسطّحة
         glow = VGroup(*[
-            Circle(radius=r, stroke_width=0, fill_color=ACCENT,
-                   fill_opacity=op)
+            Circle(radius=r, stroke_width=0, fill_color=ACCENT, fill_opacity=op)
             for r, op in ((5.2, 0.030), (3.6, 0.030), (2.2, 0.035))
         ]).move_to(ORIGIN + UP * 0.2)
         self.add(glow)
 
-        # خط علوي + عنوان القسم (محاذاة يمين لأن المحتوى عربي)
+        # عنوان القسم أعلى اليمين + خط تحته (المحتوى عربي فالمحاذاة يمين)
         if heading:
             h = _txt(heading, 38, ACCENT)
             h.to_edge(UP, buff=0.55).to_edge(RIGHT, buff=0.9)
-            rule = Line(LEFT * 0.0, LEFT * 2.4, stroke_width=3, color=ACCENT_W)
+            rule = Line(ORIGIN, LEFT * 2.4, stroke_width=3, color=ACCENT_W)
             rule.next_to(h, DOWN, buff=0.18).align_to(h, RIGHT)
             self.add(h, rule)
 
@@ -98,7 +102,7 @@ class _Flow(_Base):
 
     def build(self, items, total):
         n = len(items)
-        box_w = min(2.9, (config.frame_width - 1.6) / n - 0.35)
+        box_w = min(2.9, (config.frame_width - 1.6) / max(n, 1) - 0.35)
         boxes = VGroup()
         for it in items:
             box = RoundedRectangle(corner_radius=0.16, width=box_w, height=1.5,
@@ -115,10 +119,9 @@ class _Flow(_Base):
 
         arrows = VGroup()
         for i in range(n - 1):
-            a = Arrow(boxes[i].get_left(), boxes[i + 1].get_right(),
-                      buff=0.12, stroke_width=4, color=ACCENT_W,
-                      max_tip_length_to_length_ratio=0.28)
-            arrows.add(a)
+            arrows.add(Arrow(boxes[i].get_left(), boxes[i + 1].get_right(),
+                             buff=0.12, stroke_width=4, color=ACCENT_W,
+                             max_tip_length_to_length_ratio=0.28))
 
         step = max((total - 0.8) / max(n, 1), 0.35)
         for i in range(n):
@@ -138,8 +141,7 @@ class _Bullets(_Base):
         for it in items:
             dot = Circle(radius=0.11, stroke_width=0,
                          fill_color=ACCENT_W, fill_opacity=1)
-            label = _txt(it, 32)
-            row = VGroup(label, dot).arrange(RIGHT, buff=0.35)
+            row = VGroup(_txt(it, 32), dot).arrange(RIGHT, buff=0.35)
             rows.add(row)
         rows.arrange(DOWN, buff=0.62, aligned_edge=RIGHT)
         rows.move_to(ORIGIN + UP * 0.1).to_edge(RIGHT, buff=1.4)
@@ -157,10 +159,10 @@ class _Compare(_Base):
     """لوحتان متقابلتان: الخيار وميزته وثمنه."""
 
     def build(self, items, total):
-        items = (items + items)[:2]
+        items = (list(items) + list(items))[:2]
         panels = VGroup()
         for idx, raw in enumerate(items):
-            parts = [p.strip() for p in str(raw).split("|") if p.strip()] or ["…"]
+            parts = _split(raw)
             col = ACCENT if idx == 0 else ACCENT_W
             panel = RoundedRectangle(corner_radius=0.2, width=5.4, height=4.0,
                                      stroke_color=col, stroke_width=2.5,
@@ -194,9 +196,8 @@ class _Wave(_Base):
 
         def make_wave():
             phase = tracker.get_value()
-            xs = np.linspace(-span, span, 160)
             pts = [np.array([x, amp * np.sin(1.5 * x + phase), 0.0]) + UP * 0.25
-                   for x in xs]
+                   for x in np.linspace(-span, span, 160)]
             m = VMobject(stroke_color=ACCENT, stroke_width=5)
             m.set_points_as_corners(pts)
             return m
@@ -262,11 +263,108 @@ class _Stat(_Base):
         big = _txt(items[0], 130, ACCENT_W)
         l1 = _txt(items[1], 36)
         l2 = _txt(items[2], 28, MUTED)
-        g = VGroup(big, l1, l2).arrange(DOWN, buff=0.45).move_to(ORIGIN + UP * 0.2)
+        VGroup(big, l1, l2).arrange(DOWN, buff=0.45).move_to(ORIGIN + UP * 0.2)
 
         self.play_t(GrowFromCenter(big), run_time=0.8)
         self.play_t(FadeIn(l1, shift=UP * 0.2), run_time=0.5)
         self.play_t(FadeIn(l2, shift=UP * 0.2), run_time=0.45)
+        self.finish(total)
+
+
+class _Timeline(_Base):
+    """خط زمني للاكتشاف والاختراع — الأقدم يمينًا (اتجاه القراءة العربي)."""
+
+    def build(self, items, total):
+        n = max(len(items), 1)
+        span = min(5.8, 1.6 * n)
+        axis = Line(RIGHT * span, LEFT * span, stroke_width=3, color=MUTED)
+        axis.move_to(ORIGIN + UP * 0.35)
+        self.play_t(Create(axis), run_time=0.6)
+
+        xs = np.linspace(span, -span, n) if n > 1 else np.array([0.0])
+        step = max((total - 0.6) / n, 0.45)
+
+        for i, raw in enumerate(items):
+            parts = _split(raw)
+            year = parts[0]
+            event = parts[1] if len(parts) > 1 else ""
+
+            pos = axis.get_center() + RIGHT * float(xs[i])
+            node = Circle(radius=0.16, stroke_width=3, stroke_color=ACCENT_W,
+                          fill_color=BG, fill_opacity=1).move_to(pos)
+            y_lbl = _txt(year, 30, ACCENT_W).next_to(node, UP, buff=0.3)
+            e_lbl = _txt(event, 23, TEXT)
+            if e_lbl.width > 3.0:
+                e_lbl.scale_to_fit_width(3.0)
+            e_lbl.next_to(node, DOWN, buff=0.35)
+            # نزيح بالتناوب حتى لا تتلامس النصوص
+            if i % 2:
+                e_lbl.shift(DOWN * 0.75)
+                self.add(Line(node.get_bottom(), e_lbl.get_top(),
+                              stroke_width=1.5, color=MUTED))
+
+            self.play_t(GrowFromCenter(node), FadeIn(y_lbl, shift=DOWN * 0.15),
+                        run_time=min(0.5, step * 0.45))
+            self.play_t(FadeIn(e_lbl), run_time=min(0.35, step * 0.3))
+            self.wait_t(max(step - 0.85, 0.05))
+        self.finish(total)
+
+
+class _Profile(_Base):
+    """بطاقة عال攎م: الاسم، سنوات حياته، وإسهامه. بلا صور — هوية خطّية فقط."""
+
+    def build(self, items, total):
+        items = (list(items) + ["", "", ""])[:3]
+        name, years, deed = items[0], items[1], items[2]
+
+        panel = RoundedRectangle(corner_radius=0.25, width=9.4, height=4.2,
+                                 stroke_color=ACCENT, stroke_width=2.5,
+                                 fill_color=SURFACE, fill_opacity=0.92)
+        panel.move_to(ORIGIN + UP * 0.1)
+
+        monogram = Circle(radius=0.72, stroke_color=ACCENT_W, stroke_width=3,
+                          fill_color=BG, fill_opacity=1)
+        badge = VGroup(monogram,
+                       _txt(str(name)[:1], 52, ACCENT_W).move_to(monogram.get_center()))
+
+        n_lbl = _txt(name, 46, TEXT)
+        y_lbl = _txt(years, 30, ACCENT_W)
+        d_lbl = _txt(deed, 26, MUTED)
+        for m in (n_lbl, d_lbl):
+            if m.width > 6.6:
+                m.scale_to_fit_width(6.6)
+        info = VGroup(n_lbl, y_lbl, d_lbl).arrange(DOWN, buff=0.34,
+                                                   aligned_edge=RIGHT)
+
+        VGroup(info, badge).arrange(LEFT, buff=0.75).move_to(panel.get_center())
+
+        self.play_t(FadeIn(panel, shift=UP * 0.2), run_time=0.6)
+        self.play_t(GrowFromCenter(badge), run_time=0.5)
+        self.play_t(FadeIn(n_lbl, shift=LEFT * 0.3), run_time=0.5)
+        self.play_t(FadeIn(y_lbl), run_time=0.4)
+        self.play_t(FadeIn(d_lbl), run_time=0.45)
+        self.finish(total)
+
+
+class _Quote(_Base):
+    """اقتباس قصير مع قائله."""
+
+    def build(self, items, total):
+        items = (list(items) + ["", ""])[:2]
+        mark = _txt("”", 110, ACCENT)
+        body = _txt(items[0], 38, TEXT)
+        if body.width > config.frame_width - 3.0:
+            body.scale_to_fit_width(config.frame_width - 3.0)
+        rule = Line(LEFT * 1.4, RIGHT * 1.4, stroke_width=3, color=ACCENT_W)
+        who = _txt(items[1], 28, MUTED)
+
+        VGroup(mark, body, rule, who).arrange(DOWN, buff=0.42)\
+            .move_to(ORIGIN + UP * 0.1)
+
+        self.play_t(FadeIn(mark), run_time=0.5)
+        self.play_t(FadeIn(body, shift=UP * 0.25), run_time=0.8)
+        self.play_t(Create(rule), run_time=0.4)
+        self.play_t(FadeIn(who), run_time=0.45)
         self.finish(total)
 
 
@@ -279,7 +377,7 @@ class _Title(_Base):
             title.scale_to_fit_width(config.frame_width - 2.0)
         rule = Line(LEFT * 2.2, RIGHT * 2.2, stroke_width=4, color=ACCENT_W)
         sub = _txt(items[1] if len(items) > 1 else "", 30, MUTED)
-        g = VGroup(title, rule, sub).arrange(DOWN, buff=0.5).move_to(ORIGIN)
+        VGroup(title, rule, sub).arrange(DOWN, buff=0.5).move_to(ORIGIN)
 
         self.play_t(FadeIn(title, shift=UP * 0.3), run_time=0.9)
         self.play_t(Create(rule), run_time=0.5)
@@ -289,7 +387,9 @@ class _Title(_Base):
 
 _BUILDERS = {
     "flow": _Flow, "bullets": _Bullets, "compare": _Compare,
-    "wave": _Wave, "orbit": _Orbit, "stat": _Stat, "title": _Title,
+    "wave": _Wave, "orbit": _Orbit, "stat": _Stat,
+    "timeline": _Timeline, "profile": _Profile, "figure": _Profile,
+    "quote": _Quote, "title": _Title,
 }
 
 
@@ -301,7 +401,8 @@ def _resolve():
         return "title", block["items"], "", block.get("caption", ""), block["duration"]
     sec = SPEC["sections"][int(INDEX)]
     v = sec["visual"]
-    return v["type"], v["items"], sec.get("heading", ""), v.get("caption", ""), sec["duration"]
+    return (v["type"], v["items"], sec.get("heading", ""),
+            v.get("caption", ""), sec["duration"])
 
 
 class SectionScene(_Base):
