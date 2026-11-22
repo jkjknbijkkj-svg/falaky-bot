@@ -100,12 +100,43 @@ _SECTION_PROMPT = """أنت تكتب قسمًا واحدًا من حلقة وث�
 "keywords":["english term","english term"]}}
 """
 
+_KEY_NAMES = ("GEMINI_API_KEY", "GEMINI_API_KEY_2", "GEMINI_API_KEY2",
+              "GEMINI_API_KEY_3", "GEMINI_API_KEY3")
+
+# مفاتيح نفدت حصّتها في هذا التشغيل — لا نضيّع عليها نداءات أخرى
+_EXHAUSTED = set()
+
+
+def api_keys():
+    """كل المفاتيح المتاحة بالترتيب: الأول يُستهلك أولًا ثم الذي يليه.
+
+    تُقبل أيضًا قائمة مفصولة بفواصل في GEMINI_API_KEYS.
+    """
+    keys = []
+    for name in _KEY_NAMES:
+        v = (os.environ.get(name) or "").strip()
+        if v and v not in keys:
+            keys.append(v)
+    for v in (os.environ.get("GEMINI_API_KEYS") or "").split(","):
+        v = v.strip()
+        if v and v not in keys:
+            keys.append(v)
+    return keys
+
+
+def _is_quota(status, payload):
+    """429 أو رسالة استنفاد حصّة داخل الجسم."""
+    if status == 429:
+        return True
+    return status == 403 and "RESOURCE_EXHAUSTED" in str(payload).upper()
+
 
 def _gemini(prompt, cfg, max_tokens=4096, temperature=0.8):
     import requests
 
-    key = os.environ.get("GEMINI_API_KEY")
-    if not key:
+    keys = api_keys()
+    if not keys:
+        print("[content] لا يوجد أي مفتاح Gemini.")
         return None
 
     body = {
@@ -113,21 +144,44 @@ def _gemini(prompt, cfg, max_tokens=4096, temperature=0.8):
         "generationConfig": {"temperature": temperature,
                              "maxOutputTokens": max_tokens},
     }
-    for model in cfg["gemini"]["models"]:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        try:
-            r = requests.post(url, params={"key": key}, json=body, timeout=180)
-            if r.status_code != 200:
-                print(f"[content] {model} رفض ({r.status_code})؛ أجرّب التالي.")
+    models = cfg["gemini"]["models"]
+
+    for ki, key in enumerate(keys, 1):
+        if key in _EXHAUSTED:
+            continue
+        quota_hits = 0
+        for model in models:
+            url = ("https://generativelanguage.googleapis.com/v1beta/models/"
+                   f"{model}:generateContent")
+            try:
+                r = requests.post(url, params={"key": key}, json=body, timeout=180)
+            except Exception as e:
+                print(f"[content] المفتاح {ki}/{model}: تعذّر الاتصال ({e}).")
                 continue
-            text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-            for mark in ("```json", "```"):
-                if text.startswith(mark):
-                    text = text[len(mark):]
-            text = text.removesuffix("```").strip()
-            return json.loads(text)
-        except Exception as e:
-            print(f"[content] فشل {model}: {e}")
+
+            if _is_quota(r.status_code, r.text):
+                quota_hits += 1
+                print(f"[content] المفتاح {ki}: نفدت حصّة {model}.")
+                continue
+            if r.status_code != 200:
+                print(f"[content] المفتاح {ki}: {model} رفض ({r.status_code}).")
+                continue
+
+            try:
+                text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                for mark in ("```json", "```"):
+                    if text.startswith(mark):
+                        text = text[len(mark):]
+                return json.loads(text.removesuffix("```").strip())
+            except Exception as e:
+                print(f"[content] المفتاح {ki}/{model}: ردّ غير صالح ({e}).")
+
+        # نفدت حصّة هذا المفتاح على كل الموديلات ⇒ ننتقل للذي يليه
+        if quota_hits and quota_hits == len(models):
+            _EXHAUSTED.add(key)
+            remaining = len([k for k in keys if k not in _EXHAUSTED])
+            print(f"[content] المفتاح {ki} استُنفد بالكامل — "
+                  f"بقي {remaining} مفتاح.")
     return None
 
 
@@ -325,6 +379,7 @@ def _clean_sections(sections, cfg):
 
 
 def build_script(cfg):
+    print(f"[content] مفاتيح Gemini المتاحة: {len(api_keys())}")
     outline = _build_outline(cfg)
 
     if outline:
