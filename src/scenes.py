@@ -15,8 +15,9 @@ import json
 import os
 
 from manim import (
-    Scene, Text, VGroup, VMobject, Rectangle, RoundedRectangle, Circle, Dot,
-    Arrow, Line, FadeIn, Create, GrowFromCenter, ValueTracker, always_redraw,
+    Scene, Text, VGroup, VMobject, Group, ImageMobject, Rectangle,
+    RoundedRectangle, Circle, Dot, Arrow, Line, FadeIn, Create,
+    GrowFromCenter, ValueTracker, always_redraw,
     config, ORIGIN, UP, DOWN, LEFT, RIGHT, PI,
 )
 from manim.utils import rate_functions
@@ -68,9 +69,13 @@ def _alive(m):
 
 
 def _stack(mobs, direction=DOWN, buff=0.4, aligned_edge=None):
-    """يرصّ العناصر غير الفارغة فقط — عنصر فارغ يكسر arrange في Manim."""
+    """يرصّ العناصر غير الفارغة فقط — عنصر فارغ يكسر arrange في Manim.
+
+    VGroup لا يقبل إلا VMobject، والصور ليست كذلك، فنختار الحاوية المناسبة.
+    """
     live = [m for m in mobs if _alive(m)]
-    g = VGroup(*live)
+    container = VGroup if all(isinstance(m, VMobject) for m in live) else Group
+    g = container(*live)
     if live:
         if aligned_edge is None:
             g.arrange(direction, buff=buff)
@@ -82,6 +87,19 @@ def _stack(mobs, direction=DOWN, buff=0.4, aligned_edge=None):
 def _texts(items, size, color=None):
     """مجموعة نصوص بعد إسقاط الفارغ منها."""
     return VGroup(*[_txt(i, size, color) for i in items if str(i).strip()])
+
+
+# تفاصيل إضافية للمشهد الحالي (مثل مسار صورة العالِم) — يملؤها _resolve
+VISUAL = {}
+
+
+def _portrait_path():
+    """مسار صورة العالِم إن وُجدت، منسوبًا إلى مجلّد المواصفات."""
+    rel = VISUAL.get("portrait")
+    if not rel:
+        return None
+    full = os.path.join(os.path.dirname(os.path.abspath(SPEC_PATH)), rel)
+    return full if os.path.exists(full) else None
 
 
 class _Base(Scene):
@@ -352,7 +370,7 @@ class _Timeline(_Base):
 
 
 class _Profile(_Base):
-    """بطاقة عالِم: الاسم، سنوات حياته، وإسهامه. بلا صور — هوية خطّية فقط."""
+    """بطاقة عالِم: الاسم، سنوات حياته، وإسهامه، مع صورته إن توفّرت حرّة."""
 
     def build(self, items, total):
         vals = [str(i).strip() for i in items if str(i).strip()][:3]
@@ -364,10 +382,20 @@ class _Profile(_Base):
                                  fill_color=SURFACE, fill_opacity=0.92)
         panel.move_to(ORIGIN + UP * 0.1)
 
-        monogram = Circle(radius=0.72, stroke_color=ACCENT_W, stroke_width=3,
+        R = 0.78
+        monogram = Circle(radius=R, stroke_color=ACCENT_W, stroke_width=3,
                           fill_color=BG, fill_opacity=1)
-        badge = VGroup(monogram,
-                       _txt(name[:1] or "؟", 52, ACCENT_W).move_to(monogram.get_center()))
+
+        photo_path = _portrait_path()
+        if photo_path:
+            # الصورة مقصوصة دائريًّا مسبقًا بقناع شفّاف، فتملأ الإطار تمامًا
+            photo = ImageMobject(photo_path)
+            photo.height = 2 * R * 0.97
+            photo.move_to(monogram.get_center())
+            badge = Group(monogram, photo)
+        else:
+            badge = VGroup(monogram, _txt(name[:1] or "؟", 54, ACCENT_W)
+                           .move_to(monogram.get_center()))
 
         n_lbl = _fit_w(_txt(name, 46, TEXT), 6.6)
         y_lbl = _txt(years, 30, ACCENT_W)
@@ -377,7 +405,7 @@ class _Profile(_Base):
         _stack([info, badge], LEFT, 0.75).move_to(panel.get_center())
 
         self.play_t(FadeIn(panel, shift=UP * 0.2), run_time=0.6)
-        self.play_t(GrowFromCenter(badge), run_time=0.5)
+        self.play_t(FadeIn(badge, scale=0.9), run_time=0.5)
         for m, rt, sh in ((n_lbl, 0.5, LEFT * 0.3), (y_lbl, 0.4, None),
                           (d_lbl, 0.45, None)):
             if not _alive(m):
@@ -439,11 +467,14 @@ _BUILDERS = {
 # ------------------------------------------------------- المشهد الذي يُستدعى
 
 def _resolve():
+    global VISUAL
     if INDEX in ("intro", "outro"):
         block = SPEC[INDEX]
+        VISUAL = {}
         return "title", block["items"], "", block.get("caption", ""), block["duration"]
     sec = SPEC["sections"][int(INDEX)]
     v = sec["visual"]
+    VISUAL = v
     return (v["type"], v["items"], sec.get("heading", ""),
             v.get("caption", ""), sec["duration"])
 
