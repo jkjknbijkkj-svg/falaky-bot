@@ -4,9 +4,10 @@
   "niche": "فيزياء الأجهزة الكهربائية والإلكترونية اليومية: كيف يعمل المعالج، البطارية، الشاحن، المحرّك الكهربائي، الشاشة، الميكروويف، السيارة الكهربائية",
 
   "episode": {
-    "target_minutes": 6,
-    "min_sections": 4,
-    "max_sections": 6
+    "target_minutes": 22,
+    "min_sections": 10,
+    "max_sections": 14,
+    "words_per_section": 260
   },
 
   "video": {
@@ -47,8 +48,12 @@
     "section_gap_seconds": 0.55
   },
 
+  "render": {
+    "manim_timeout_seconds": 2400
+  },
+
   "footage": {
-    "enabled": true,
+    "enabled": false,
     "max_clips": 6,
     "accent_seconds": 3.2
   },
