@@ -1,23 +1,28 @@
 {
-  "channel_name": "فيزياء مبسّطة",
-  "topic_prompt": "حقائق مذهلة ومبسّطة في الفيزياء والفلك، كل حقيقة قصيرة ودقيقة علميًا",
+  "channel_name": "فيزياء الأجهزة",
+
+  "niche": "فيزياء الأجهزة الكهربائية والإلكترونية اليومية: كيف يعمل المعالج، البطارية، الشاحن، المحرّك الكهربائي، الشاشة، الميكروويف، السيارة الكهربائية",
+
+  "episode": {
+    "target_minutes": 6,
+    "min_sections": 4,
+    "max_sections": 6
+  },
 
   "video": {
     "width": 1920,
     "height": 1080,
-    "fps": 30,
-    "min_duration_seconds": 14,
-    "num_clips": 6
+    "fps": 30
   },
 
-  "music_path": "assets/music.mp3",
-
-  "style": {
-    "bg_top": [8, 14, 34],
-    "bg_bottom": [2, 4, 12],
-    "accent": [88, 166, 255],
-    "title_color": [245, 249, 255],
-    "text_color": [240, 246, 255],
+  "design": {
+    "bg": "#0B1020",
+    "surface": "#161F3C",
+    "accent": "#4CC9F0",
+    "accent_warm": "#F7B801",
+    "text": "#EAF2FF",
+    "muted": "#93A6C8",
+    "font_family": "Amiri",
     "font_path_candidates": [
       "assets/arabic.ttf",
       "/usr/share/fonts/truetype/amiri/Amiri-Regular.ttf",
@@ -26,12 +31,29 @@
     ]
   },
 
+  "audio": {
+    "music_path": "assets/music.mp3",
+    "music_gain_speech": 0.07,
+    "music_gain_gap": 0.26,
+    "duck_attack": 0.25,
+    "duck_release": 0.65
+  },
+
   "voice": {
-    "edge_voice": "ar-EG-SalmaNeural",
-    "rate": "-6%"
+    "edge_voice": "ar-SA-HamedNeural",
+    "fallback_voices": ["ar-EG-ShakirNeural", "ar-SA-ZariyahNeural", "ar-EG-SalmaNeural"],
+    "rate": "-7%",
+    "pitch": "-2Hz",
+    "section_gap_seconds": 0.55
+  },
+
+  "footage": {
+    "enabled": true,
+    "max_clips": 6,
+    "accent_seconds": 3.2
   },
 
   "gemini": {
-    "model": "gemini-1.5-flash"
+    "models": ["gemini-3.6-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
   }
 }
