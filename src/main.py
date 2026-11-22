@@ -45,6 +45,22 @@ def _read(path):
         return json.load(fh)
 
 
+def _report(lines):
+    """يطبع الخلاصة في السجل، ويكتبها أيضًا في صفحة التشغيلة على GitHub.
+
+    بدونها كان التشغيل ينجح دون أن يقول هل نُشر الفيديو ولا لماذا.
+    """
+    text = "\n".join(lines)
+    print("\n" + text)
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if path:
+        try:
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(text + "\n")
+        except Exception as e:
+            print(f"[report] تعذّرت كتابة الخلاصة: {e}")
+
+
 # ------------------------------------------------------------ المرحلة الأولى
 
 def build_spec(script, spans, cfg):
@@ -128,20 +144,45 @@ def stage_assemble(cfg, publish):
     render.assemble(segments, spans, total, cfg, video_path)
 
     meta = _read(os.path.join(OUT, "meta.json"))
+    script = _read(os.path.join(OUT, "script.json"))
+    source = script.get("source", "?")
+
+    report = [
+        "## نتيجة الحلقة",
+        f"- **العنوان:** {script.get('title', '')}",
+        f"- **الأقسام:** {len(script.get('sections', []))}",
+        f"- **الطول:** {total / 60:.1f} دقيقة",
+        f"- **مصدر السكريبت:** {'Gemini' if source == 'gemini' else 'احتياطي'}",
+    ]
 
     # حماية: الحلقة الاحتياطية أقصر من هدف القناة، فلا تُنشر تلقائيًا.
-    script = _read(os.path.join(OUT, "script.json"))
-    if publish and script.get("source") == "fallback":
-        print("[assemble] السكريبت احتياطي (تعذّر Gemini) — أوقفت النشر. "
-              "الفيديو محفوظ كأثر للمراجعة اليدوية.")
-        publish = False
+    blocked = None
+    if not publish:
+        blocked = ("سرّ `YT_REFRESH_TOKEN` غير مضبوط"
+                   if not os.environ.get("YT_REFRESH_TOKEN")
+                   else "النشر مُعطّل (PUBLISH=0)")
+    elif source == "fallback":
+        blocked = ("السكريبت احتياطي (تعذّر Gemini) وأقصر من هدف القناة — "
+                   "أوقفت النشر عمدًا")
 
-    if publish:
-        print("[assemble] الرفع إلى يوتيوب…")
-        import youtube
-        youtube.upload(video_path, meta["title"], meta["description"], meta["tags"])
+    if blocked:
+        report.append(f"- **لم يُنشر:** {blocked}.")
+        report.append("- الفيديو محفوظ في أثر `episode` للمراجعة.")
     else:
-        print("[assemble] لم يُنشر. أضف --publish بعد ضبط أسرار YT_*.")
+        try:
+            import youtube
+            res = youtube.upload(video_path, meta["title"], meta["description"],
+                                 meta["tags"], cfg)
+            report.append(f"- **رُفع:** {res['url']}")
+            report.append(f"- **درجة الظهور:** `{res['privacy']}` — {res['note']}.")
+            if res["privacy"] == "private":
+                report.append("- لتغييرها: `youtube.privacy` في `config.json` "
+                              "← `unlisted` أو `public`.")
+        except Exception as e:
+            report.append(f"- **فشل الرفع:** {type(e).__name__}: {e}")
+            report.append("- الفيديو محفوظ في أثر `episode`.")
+
+    _report(report)
 
 
 # ------------------------------------------------------------------ المدخل

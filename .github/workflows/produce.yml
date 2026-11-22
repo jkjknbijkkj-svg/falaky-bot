@@ -22,7 +22,13 @@ jobs:
 
       - name: كتابة السكريبت وتوليد التعليق
         env:
+          # تدوير المفاتيح: يُستهلك الأول ثم ينتقل تلقائيًا للذي يليه.
+          # الأسماء غير الموجودة تصل فارغة فتُتجاهَل.
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY2: ${{ secrets.GEMINI_API_KEY2 }}
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
         run: python src/main.py --stage script
 
       - name: تحديد قائمة المشاهد
@@ -91,7 +97,6 @@ jobs:
 
       - name: التركيب (والنشر إن وُجدت أسرار يوتيوب)
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
