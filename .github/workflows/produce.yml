@@ -1,33 +1,39 @@
 name: produce-video
 
 # يعمل على خوادم GitHub السحابية — جهازك مطفأ والعمل يستمر.
+# الريبو عام، فدقائق التشغيل مجانية بلا سقف.
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 7 * * *"
+    # حلقة أسبوعية: الجودة قبل الكمّية.
+    - cron: "17 7 * * 3"
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
-      - name: تثبيت خط عربي + ffmpeg
+      - name: تثبيت متطلّبات النظام (Manim + ffmpeg + خطوط عربية)
         run: |
-          sudo apt-get update -qq || true
-          sudo apt-get install -y -qq ffmpeg || true
-          sudo apt-get install -y -qq fonts-hosny-amiri || true
-          sudo apt-get install -y -qq fonts-kacst || true
-          sudo apt-get install -y -qq fonts-noto-core || true
-          echo "--- الخطوط العربية المثبتة ---"
-          fc-list | grep -iE "amiri|kacst|naskh|arabic" || echo "تحذير: لا خط عربي"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            ffmpeg pkg-config python3-dev \
+            libcairo2-dev libpango1.0-dev \
+            fonts-hosny-amiri fonts-noto-core fonts-kacst
+          echo "--- الخطوط العربية ---"
+          fc-list | grep -iE "amiri|kacst|naskh" || echo "تحذير: لا خط عربي"
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
 
       - name: تثبيت المكتبات
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: صناعة الفيديو (ونشره إن وُجدت أسرار يوتيوب)
         env:
@@ -40,9 +46,13 @@ jobs:
           PUBLISH: ${{ secrets.YT_REFRESH_TOKEN != '' && '1' || '0' }}
         run: python src/main.py
 
-      - name: حفظ الفيديو كأثر قابل للتنزيل
+      - name: حفظ الفيديو والسكريبت كأثر قابل للتنزيل
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: video
-          path: output/video.mp4
-          retention-days: 7
+          name: episode
+          path: |
+            output/video.mp4
+            output/script.json
+            output/meta.json
+          retention-days: 14

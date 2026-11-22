@@ -1,7 +1,8 @@
 """
-المنظّم: حقيقة -> صوت -> لقطات -> منتاج -> (اختياريًا) رفع.
-  python src/main.py            # يصنع الفيديو فقط
-  python src/main.py --publish  # يصنع وينشر على يوتيوب
+المنظّم: سكريبت -> تعليق مقسّم -> خط زمني -> مشاهد Manim -> تركيب -> رفع.
+
+    python src/main.py            # يصنع الفيديو فقط
+    python src/main.py --publish  # يصنع وينشر على يوتيوب
 """
 
 import json
@@ -14,8 +15,43 @@ sys.path.insert(0, HERE)
 
 import content
 import voice
-import footage
+import audio
+import visuals
 import render
+
+
+def build_spec(script, spans, cfg):
+    """ملفّ يقرأه Manim: التصميم + محتوى كل مشهد + مدّته الدقيقة."""
+    # مدّة كل مشهد = من بدايته إلى بداية ما بعده (فيبتلع الفاصل)
+    durations = []
+    for i, s in enumerate(spans):
+        if i < len(spans) - 1:
+            durations.append(round(spans[i + 1]["start"] - s["start"], 3))
+        else:
+            durations.append(round(s["duration"], 3))
+
+    sections = []
+    for i, sec in enumerate(script["sections"]):
+        sections.append({
+            "heading": sec["heading"],
+            "visual": sec["visual"],
+            "duration": durations[i + 1],      # +1 لأن أوّل جزء هو الخطّاف
+        })
+
+    return {
+        "design": cfg["design"],
+        "intro": {
+            "items": [script["title"], cfg["channel_name"]],
+            "caption": "",
+            "duration": durations[0],
+        },
+        "sections": sections,
+        "outro": {
+            "items": [cfg["channel_name"], "تابِع لمزيد من الحلقات"],
+            "caption": "",
+            "duration": durations[-1],
+        },
+    }
 
 
 def main():
@@ -25,39 +61,45 @@ def main():
         cfg = json.load(fh)
 
     out_dir = os.path.join(ROOT, "output")
-    os.makedirs(out_dir, exist_ok=True)
-    voice_path = os.path.join(out_dir, "voice.mp3")
+    work_dir = os.path.join(out_dir, "work")
+    os.makedirs(work_dir, exist_ok=True)
     video_path = os.path.join(out_dir, "video.mp4")
 
-    print("[1/4] توليد الحقيقة…")
-    fact = content.get_fact(cfg)
-    print("      العنوان:", fact["title"], "| كلمات:", fact["keywords"])
+    print("[1/5] كتابة السكريبت…")
+    script = content.build_script(cfg)
+    print(f"      {script['title']} — {len(script['sections'])} أقسام")
 
-    print("[2/4] توليد الصوت…")
-    dur = voice.synth(fact["narration"], voice_path, cfg)
-    print("      المدة:", round(dur, 1) if dur else "صامت")
+    print("[2/5] التعليق الصوتي (جزء لكل مشهد)…")
+    parts = voice.synth_script(script, cfg, work_dir)
 
-    print("[3/4] جلب اللقطات…")
-    clips = footage.fetch(fact["keywords"], cfg["video"].get("num_clips", 6))
+    gap = float(cfg["voice"].get("section_gap_seconds", 0.5))
+    spans, total = audio.layout(parts, gap)
+    print(f"      الطول الكلّي: {total:.1f} ثانية ({total/60:.1f} دقيقة)")
 
-    print("[4/4] المنتاج…")
-    render.build_video(fact, voice_path, dur, clips, cfg, video_path)
-    print("      تم:", video_path)
+    print("[3/5] تجهيز مواصفات المشاهد…")
+    spec = build_spec(script, spans, cfg)
+    spec_path = os.path.join(work_dir, "spec.json")
+    with open(spec_path, "w", encoding="utf-8") as fh:
+        json.dump(spec, fh, ensure_ascii=False, indent=1)
 
-    meta = {
-        "title": f"{fact['title']} | {cfg['channel_name']}",
-        "description": fact["narration"] + "\n\n#فيزياء #علوم #فضاء",
-        "tags": ["فيزياء", "علوم", "فضاء", "حقائق علمية", "تعليم"],
-    }
+    print("[4/5] رسم المشاهد…")
+    segments = visuals.render_all(spec, spec_path, cfg, work_dir)
+
+    print("[5/5] التركيب النهائي…")
+    render.assemble(segments, spans, total, cfg, video_path)
+
+    meta = content.build_meta(script, cfg)
     with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as fh:
-        json.dump(meta, fh, ensure_ascii=False)
+        json.dump(meta, fh, ensure_ascii=False, indent=1)
+    with open(os.path.join(out_dir, "script.json"), "w", encoding="utf-8") as fh:
+        json.dump(script, fh, ensure_ascii=False, indent=1)
 
     if publish:
         print("[+] الرفع إلى يوتيوب…")
         import youtube
         youtube.upload(video_path, meta["title"], meta["description"], meta["tags"])
     else:
-        print("[i] لم يُنشر (محرّك فقط). أضف --publish بعد ضبط أسرار YT_*.")
+        print("[i] لم يُنشر. أضف --publish بعد ضبط أسرار YT_*.")
 
 
 if __name__ == "__main__":
