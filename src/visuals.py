@@ -111,21 +111,43 @@ def _fallback_card(index, spec, cfg, out_dir, name, duration):
     return mp4
 
 
+def _plain_clip(cfg, out_dir, name, duration):
+    """ملاذ أخير: لقطة سادة بلون الخلفية — لا تحتاج خطًّا ولا Manim.
+
+    وجودها يضمن أن فشل مشهد واحد لا يُسقط الحلقة كلّها ولا يكسر التزامن.
+    """
+    from moviepy.editor import ColorClip
+
+    v = cfg["video"]
+    bg = design.hex_rgb(cfg["design"]["bg"], (11, 16, 32))
+    mp4 = os.path.join(out_dir, f"{name}.mp4")
+    ColorClip((v["width"], v["height"]), color=bg).set_duration(duration)\
+        .write_videofile(mp4, fps=v["fps"], codec="libx264", audio=False,
+                         preset="ultrafast", threads=4, logger=None)
+    return mp4
+
+
 # ------------------------------------------------------------------ الواجهة
 
 def render_one(spec, spec_path, cfg, work_dir, idx):
-    """يرسم مشهدًا واحدًا ويعيد مسار ملفّه."""
+    """يرسم مشهدًا واحدًا ويعيد مسار ملفّه، مهما حدث."""
     os.makedirs(work_dir, exist_ok=True)
     media_dir = os.path.join(work_dir, "manim")
     name = seg_name(idx)
+    duration = duration_of(spec, idx)
 
-    out = _render_manim(idx, spec_path, media_dir, cfg, name) \
-        if manim_available() else None
+    out = None
+    if manim_available():
+        out = _render_manim(idx, spec_path, media_dir, cfg, name)
+    else:
+        print("[visuals] Manim غير متاح — بطاقة مصمّمة بديلًا.")
+
     if out is None:
-        if not manim_available():
-            print("[visuals] Manim غير متاح — بطاقة مصمّمة بديلًا.")
-        out = _fallback_card(idx, spec, cfg, work_dir, name,
-                             duration_of(spec, idx))
+        try:
+            out = _fallback_card(idx, spec, cfg, work_dir, name, duration)
+        except Exception as e:
+            print(f"[visuals] تعذّرت البطاقة البديلة للقسم {idx}: {e}")
+            out = _plain_clip(cfg, work_dir, name, duration)
 
     # ننسخ الناتج إلى مكان ثابت حتى تجده مرحلة التركيب
     final = os.path.join(work_dir, f"{name}.mp4")

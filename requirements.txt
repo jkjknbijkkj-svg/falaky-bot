@@ -3,7 +3,9 @@ moviepy==1.0.3
 Pillow>=10.0.0
 numpy>=1.24.0
 arabic-reshaper>=3.0.0
-python-bidi==0.4.2
+# لا نثبّت 0.4.2 بالتحديد: نسخة ٢٠١٩ قد تفشل بناءً على بايثون ٣.١٢.
+# design.py يتعامل مع واجهتَي الاستيراد القديمة والجديدة.
+python-bidi>=0.4.2
 requests>=2.31.0
 google-api-python-client>=2.100.0
 google-auth>=2.23.0
