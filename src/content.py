@@ -1,229 +1,309 @@
 """
-توليد سكريبت الحلقة ببنية وثائقية حقيقية.
+توليد سكريبت حلقة وثائقية طويلة (٢٠ دقيقة فأكثر) على مرحلتين.
 
-البنية المُخرجة (ثابتة دائمًا):
+لماذا مرحلتان؟ لأن طلب سكريبت ٣٠٠٠ كلمة في نداء واحد يصطدم بحدّ التوكنز
+ويُخرج نصًّا سطحيًا. فنطلب أولًا **المخطّط**، ثم نوسّع كل قسم في نداء مستقل.
+النتيجة: عمق حقيقي في كل قسم بدل تلخيص متسرّع للكل.
+
+المتطلّبات المفروضة على كل حلقة:
+  • شرح دقيق خطوة بخطوة، لا إشارات عامّة
+  • مثال ملموس من حياة المشاهد في كل قسم
+  • مخاطبة المشاهد مباشرةً (تخيّل، لاحظ معي، جرّب)
+  • أصل الفكرة: الاكتشاف ثم الاختراع
+  • العلماء بأسمائهم وتواريخ حياتهم وما فعلوه بالضبط
+
+البنية المُخرجة:
 {
-  "title": str,
-  "hook": str,                      # أول 10-15 ثانية: سؤال يشدّ المشاهد
-  "sections": [
-      {
-        "heading": str,             # عنوان القسم (قصير)
-        "narration": str,           # نص التعليق لهذا القسم
-        "visual": {                 # توجيه بصري لمشهد Manim
-            "type": "flow|bullets|compare|wave|orbit|stat",
-            "items": [...],
-            "caption": str
-        },
-        "keywords": [str, ...]      # كلمات إنجليزية للقطات ستوك مساندة
-      }, ...
-  ],
-  "outro": str,
-  "tags": [str, ...]
+  "title", "hook",
+  "sections": [{"heading", "narration", "visual": {...}, "keywords"}],
+  "outro", "tags"
 }
-
-إن لم يوجد GEMINI_API_KEY (أو فشل الطلب) نرجع لحلقة احتياطية كاملة
-ومكتوبة بعناية — المشروع يعمل من أول تشغيل بلا أي مفتاح.
 """
 
 import json
 import os
 import random
 
-VISUAL_TYPES = ("flow", "bullets", "compare", "wave", "orbit", "stat")
+VISUAL_TYPES = ("flow", "bullets", "compare", "wave", "orbit", "stat",
+                "timeline", "profile", "quote")
+
+# أنواع يجب أن تظهر مرّة على الأقل في كل حلقة
+REQUIRED_TYPES = ("timeline", "profile")
+
+
+# ---------------------------------------------------------------- Gemini
+
+_RULES = """قواعد الكتابة الإلزامية:
+- العربية الفصحى فقط، بنبرة وثائقية رصينة. بلا عامية وبلا مزاح.
+- جُمل قصيرة وواضحة. تجنّب الحشو ومبالغات مثل "مذهل" و"لا يُصدّق".
+- **الدقّة مطلقة**: لا تذكر اسمًا ولا تاريخًا ولا رقمًا إلا إن كنت واثقًا منه تمامًا.
+  إن لم تكن واثقًا من تاريخ، اذكر الحقبة بدل السنة.
+- **خاطب المشاهد مباشرةً** في كل قسم: "تخيّل أنك…"، "لاحظ معي…"، "جرّب أن…".
+  اجعله يشعر أنك تشرح له هو، لا أنك تلقي محاضرة.
+- **مثال ملموس في كل قسم** من أدوات يستعملها المشاهد يوميًا.
+- احكِ **أصل الفكرة**: من لاحظها أول مرّة، وكيف تحوّلت من اكتشاف إلى اختراع.
+- عند ذكر عالِم: اسمه كاملًا، سنتا ميلاده ووفاته، وماذا فعل بالضبط ومتى."""
+
+_OUTLINE_PROMPT = """أنت كاتب سيناريو وثائقي علمي بالعربية الفصحى.
+
+صمّم مخطّط حلقة وثائقية مدّتها نحو {minutes} دقيقة عن موضوع واحد من هذا المجال:
+{niche}
+
+{rules}
+
+بنية الحلقة المطلوبة ({min_sections} إلى {max_sections} قسمًا):
+1. أقسام تشرح المبدأ الفيزيائي خطوة بخطوة.
+2. قسم أو أكثر عن **الاكتشاف الأصلي**: من لاحظ الظاهرة ومتى وكيف.
+3. قسم أو أكثر عن **العلماء**: حياتهم وتواريخها وإسهامهم (نوع المشهد profile).
+4. قسم **خط زمني** يربط المحطّات بالسنوات (نوع المشهد timeline).
+5. أقسام عن التطبيق اليومي والمقايضات الهندسية.
+
+أنواع المشاهد المتاحة: flow, bullets, compare, wave, orbit, stat, timeline, profile, quote
+يجب أن يظهر timeline مرّة على الأقل، و profile مرّة على الأقل.
+
+أعد JSON فقط بهذا الشكل:
+{{"title":"عنوان الحلقة",
+"hook":"فقرة الخطّاف: مفارقة محسوسة من حياة المشاهد، ٣ إلى ٥ جمل",
+"outro":"خاتمة من ثلاث جمل",
+"tags":["وسم","وسم","وسم"],
+"sections":[{{"heading":"عنوان القسم","angle":"ماذا يغطّي هذا القسم بالضبط وما المثال المستعمل فيه","visual_type":"flow"}}]}}
+"""
+
+_SECTION_PROMPT = """أنت تكتب قسمًا واحدًا من حلقة وثائقية عربية بعنوان: {title}
+
+القسم: {heading}
+زاويته: {angle}
+
+سياق الحلقة (عناوين الأقسام بالترتيب):
+{outline}
+
+{rules}
+
+اكتب نصّ التعليق لهذا القسم فقط، نحو {words} كلمة، متّصلًا بما قبله ومنتهيًا بما يمهّد لما بعده.
+لا تُعِد عنوان القسم داخل النص، ولا تكتب مقدّمة عن نفسك.
+
+نوع المشهد البصري لهذا القسم: {visual_type}
+املأ items بحسب النوع:
+- flow: ٣ إلى ٥ مراحل مرتّبة.
+- bullets: ٣ إلى ٤ نقاط قصيرة.
+- compare: عنصران فقط بالشكل "الخيار|الميزة|الثمن".
+- wave: ٢ إلى ٣ تسميات قصيرة.
+- orbit: ٢ إلى ٣ تسميات قصيرة.
+- stat: ثلاثة عناصر: [الرقم, سطر توضيح, سطر ثانوي].
+- timeline: ٣ إلى ٥ عناصر بالشكل "السنة|الحدث" مرتّبة زمنيًا.
+- profile: ثلاثة عناصر: [اسم العالِم, "سنة الميلاد — سنة الوفاة", إسهامه في سطر].
+- quote: عنصران: [نصّ الاقتباس القصير, اسم قائله].
+
+أعد JSON فقط:
+{{"narration":"نص التعليق",
+"visual":{{"type":"{visual_type}","items":["..."],"caption":"سطر قصير يلخّص المشهد"}},
+"keywords":["english term","english term"]}}
+"""
+
+
+def _gemini(prompt, cfg, max_tokens=4096, temperature=0.8):
+    import requests
+
+    key = os.environ.get("GEMINI_API_KEY")
+    if not key:
+        return None
+
+    body = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": temperature,
+                             "maxOutputTokens": max_tokens},
+    }
+    for model in cfg["gemini"]["models"]:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        try:
+            r = requests.post(url, params={"key": key}, json=body, timeout=180)
+            if r.status_code != 200:
+                print(f"[content] {model} رفض ({r.status_code})؛ أجرّب التالي.")
+                continue
+            text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            for mark in ("```json", "```"):
+                if text.startswith(mark):
+                    text = text[len(mark):]
+            text = text.removesuffix("```").strip()
+            return json.loads(text)
+        except Exception as e:
+            print(f"[content] فشل {model}: {e}")
+    return None
+
+
+def _build_outline(cfg):
+    ep = cfg["episode"]
+    prompt = _OUTLINE_PROMPT.format(
+        minutes=ep["target_minutes"],
+        niche=cfg["niche"],
+        rules=_RULES,
+        min_sections=ep["min_sections"],
+        max_sections=ep["max_sections"],
+    )
+    data = _gemini(prompt, cfg, max_tokens=4096, temperature=0.9)
+    if not data or not data.get("sections"):
+        return None
+
+    secs = []
+    for raw in data["sections"][: ep["max_sections"]]:
+        if not isinstance(raw, dict) or not raw.get("heading"):
+            continue
+        vt = str(raw.get("visual_type") or "bullets").lower().strip()
+        secs.append({
+            "heading": str(raw["heading"]).strip(),
+            "angle": str(raw.get("angle") or "").strip(),
+            "visual_type": vt if vt in VISUAL_TYPES else "bullets",
+        })
+    if len(secs) < 3:
+        return None
+
+    # نضمن وجود الأنواع الإلزامية حتى لو أغفلها المخطّط
+    present = {s["visual_type"] for s in secs}
+    for need in REQUIRED_TYPES:
+        if need not in present:
+            for s in secs:
+                if s["visual_type"] in ("bullets", "flow"):
+                    s["visual_type"] = need
+                    break
+
+    data["sections"] = secs
+    return data
+
+
+def _expand_section(outline, idx, cfg):
+    ep = cfg["episode"]
+    stub = outline["sections"][idx]
+    headings = "\n".join(f"{i+1}. {s['heading']}"
+                         for i, s in enumerate(outline["sections"]))
+    prompt = _SECTION_PROMPT.format(
+        title=outline.get("title", ""),
+        heading=stub["heading"],
+        angle=stub["angle"],
+        outline=headings,
+        rules=_RULES,
+        words=ep.get("words_per_section", 260),
+        visual_type=stub["visual_type"],
+    )
+    data = _gemini(prompt, cfg, max_tokens=3072, temperature=0.75)
+    if not data or not str(data.get("narration") or "").strip():
+        return None
+
+    vis = data.get("visual") or {}
+    vtype = str(vis.get("type") or stub["visual_type"]).lower().strip()
+    if vtype not in VISUAL_TYPES:
+        vtype = stub["visual_type"]
+    items = [str(i).strip() for i in (vis.get("items") or []) if str(i).strip()][:5]
+    if not items:
+        items = [stub["heading"]]
+
+    return {
+        "heading": stub["heading"],
+        "narration": str(data["narration"]).strip(),
+        "visual": {"type": vtype, "items": items,
+                   "caption": str(vis.get("caption") or "").strip()},
+        "keywords": [str(k) for k in (data.get("keywords") or [])][:4],
+    }
 
 
 # ---------------------------------------------------------------- الاحتياطي
 
 FALLBACK_EPISODES = [
     {
-        "title": "لماذا يسخن شاحن هاتفك؟",
-        "hook": "ضع يدك على شاحن هاتفك بعد نصف ساعة. إنه دافئ. تلك الحرارة ليست عيبًا في الشاحن، بل هي قانون فيزيائي لا يمكن لأي مهندس أن يتجاوزه.",
+        "title": "البطارية: قصّة قرنين من مطاردة الكهرباء",
+        "hook": "في جيبك الآن جهاز يختزن طاقة تكفي لتشغيل مصباح ساعات طويلة، في حجم قطعة بسكويت. لم يسقط هذا من السماء. وراءه سلسلة من المصادفات والخلافات العلمية امتدّت أكثر من قرنين. وأغربها أن كل شيء بدأ بساقَي ضفدع ميّت.",
         "sections": [
             {
-                "heading": "رحلة الكهرباء",
-                "narration": "الكهرباء التي تصل بيتك تأتي بجهد مرتفع ومتردّد، يتغيّر اتجاهه عشرات المرات في الثانية. لكن بطارية هاتفك لا تفهم هذه اللغة إطلاقًا؛ فهي تحتاج تيارًا ثابتًا بجهد منخفض. مهمة الشاحن كلها هي الترجمة بين هاتين اللغتين.",
+                "heading": "ساقا الضفدع",
+                "narration": "في ثمانينيات القرن الثامن عشر كان الطبيب الإيطالي لويجي غالفاني يشرّح ضفدعًا في مختبره في بولونيا. لامس مشرطه المعدني ساق الضفدع، فانتفضت الساق فجأة كأنها حيّة. تخيّل المشهد: حيوان ميّت منذ ساعات، وعضلته تتحرّك أمام عينيك. استنتج غالفاني أن في أنسجة الحيوان كهرباء خاصّة سمّاها الكهرباء الحيوانية. كان مخطئًا في التفسير، لكن ملاحظته كانت صحيحة تمامًا، وهذا وحده يكفي لتغيير التاريخ. لاحظ معي القاعدة التي تتكرّر في كل اكتشاف: الملاحظة الدقيقة أثمن من التفسير السريع.",
+                "visual": {
+                    "type": "profile",
+                    "items": ["لويجي غالفاني", "١٧٣٧ — ١٧٩٨", "لاحظ انقباض عضلة الضفدع بتأثير المعدن"],
+                    "caption": "ملاحظة صحيحة، وتفسير خاطئ",
+                },
+                "keywords": ["old laboratory", "science history", "anatomy"],
+            },
+            {
+                "heading": "الخلاف الذي أنتج البطارية",
+                "narration": "لم يقتنع زميله أليساندرو فولتا بتفسير الكهرباء الحيوانية. كان يرى أن مصدر الكهرباء ليس الضفدع، بل المعدنان المختلفان اللذان لامساه، وأن النسيج الرطب مجرّد وسيط. ولكي يثبت ذلك، فعل شيئًا بسيطًا وحاسمًا: أزال الحيوان من المعادلة تمامًا. رصّ أقراصًا من الزنك وأقراصًا من النحاس بالتناوب، وفصل بينها بورق مبلّل بماء مالح. وفي عام ألف وثمانمئة حصل على تيار كهربائي مستمرّ لأول مرّة في التاريخ. هذا هو العمود الفولتي. الخلاف العلمي هنا لم يكن عائقًا، بل كان هو المحرّك.",
                 "visual": {
                     "type": "flow",
-                    "items": ["الشبكة ٢٢٠ فولت", "محوّل خافض", "مقوّم", "مرشّح", "البطارية ٥ فولت"],
-                    "caption": "الشاحن سلسلة ترجمة، لا مجرد سلك",
+                    "items": ["قرص زنك", "ورق مبلّل بمحلول ملحي", "قرص نحاس", "تكرار الترتيب", "تيار مستمرّ"],
+                    "caption": "العمود الفولتي، ١٨٠٠",
                 },
-                "keywords": ["power grid cables", "phone charging", "electricity pylon"],
+                "keywords": ["voltaic pile", "zinc copper discs", "science museum"],
             },
             {
-                "heading": "أين تذهب الطاقة المفقودة؟",
-                "narration": "في كل خطوة من هذه الخطوات تضيع نسبة من الطاقة. لا تختفي هذه الطاقة، لأن اختفاءها مستحيل؛ بل تتحوّل إلى الشكل الوحيد المتبقّي أمامها، وهو الحرارة. الشاحن الجيد يحوّل نحو تسعين بالمئة من الطاقة، والعشرة الباقية هي ما تشعر به تحت أصابعك.",
+                "heading": "فولتا: الرجل والتاريخ",
+                "narration": "وُلد أليساندرو فولتا في مدينة كومو الإيطالية عام ألف وسبعمئة وخمسة وأربعين، وعاش حتى عام ألف وثمانمئة وسبعة وعشرين. لم يكن مخترعًا منعزلًا، بل أستاذ فيزياء عرض اختراعه على الجمعية الملكية في لندن، فانتشر الخبر في أوروبا خلال أشهر. وتكريمًا له سُمّيت وحدة فرق الجهد باسمه: الفولت. في كل مرّة تقرأ على شاحنك عبارة خمسة فولت، أنت تقرأ اسم رجل مات قبل مئتي عام.",
                 "visual": {
-                    "type": "stat",
-                    "items": ["٩٠٪", "من الطاقة تصل للبطارية", "١٠٪ تتحوّل حرارة"],
-                    "caption": "الطاقة لا تفنى، بل تغيّر شكلها",
+                    "type": "profile",
+                    "items": ["أليساندرو فولتا", "١٧٤٥ — ١٨٢٧", "بنى أول بطارية حقيقية عام ١٨٠٠"],
+                    "caption": "الفولت: وحدة تحمل اسمه",
                 },
-                "keywords": ["heat thermal", "circuit board closeup", "energy"],
+                "keywords": ["Como Italy", "historical portrait frame", "physics history"],
             },
             {
-                "heading": "لماذا الحرارة تحديدًا؟",
-                "narration": "داخل أسلاك الشاحن تندفع الإلكترونات، فتصطدم بذرّات المعدن في طريقها. كل اصطدام يسرق جزءًا صغيرًا من طاقة حركتها ويحوّله إلى اهتزاز في الذرّة. واهتزاز الذرّات هو بالضبط ما نسمّيه حرارة. المقاومة الكهربائية ليست سوى اسم آخر لهذا الازدحام.",
+                "heading": "من الفضول إلى الاستعمال",
+                "narration": "بقي العمود الفولتي لعقود أداة مختبر لا أكثر. المشكلة أنه ينفد ولا يُشحن. وفي عام ألف وثمانمئة وتسعة وخمسين قدّم الفرنسي غاستون بلانتيه حلًّا مختلفًا: خليّة من الرصاص وحمض الكبريتيك يمكن إعادة شحنها مرّات ومرّات. هذه هي البطارية القابلة للشحن الأولى، وهي نفسها التي تدير سيارتك اليوم بعد أكثر من قرن ونصف. تخيّل اختراعًا تستعمله يوميًا ولم يتغيّر مبدؤه منذ عهد نابليون الثالث.",
+                "visual": {
+                    "type": "compare",
+                    "items": ["عمود فولتا|تيار مستمرّ أول مرّة|ينفد ولا يُشحن", "خليّة بلانتيه|قابلة للشحن|ثقيلة جدًا"],
+                    "caption": "القفزة: من الاستهلاك إلى الشحن",
+                },
+                "keywords": ["lead acid battery", "car battery", "industrial history"],
+            },
+            {
+                "heading": "خط زمني يختصر قرنين",
+                "narration": "دعنا نرتّب المحطّات حتى تتضح الصورة. ملاحظة غالفاني في ثمانينيات القرن الثامن عشر، ثم عمود فولتا عام ألف وثمانمئة، ثم خليّة بلانتيه القابلة للشحن عام ألف وثمانمئة وتسعة وخمسين. وبعد قرن كامل من التحسينات الصغيرة جاءت القفزة الكبرى: ستانلي ويتينغهام يبني أول بطارية ليثيوم قابلة للشحن في شركة إكسون عام ألف وتسعمئة وستة وسبعين. لاحظ أن المسافة بين كل محطّة والتي تليها ليست ثابتة؛ العلم لا يتقدّم بخطوات متساوية.",
+                "visual": {
+                    "type": "timeline",
+                    "items": ["١٧٨٠|غالفاني يلاحظ انقباض العضلة", "١٨٠٠|فولتا يبني العمود الفولتي", "١٨٥٩|بلانتيه وأول بطارية تُشحن", "١٩٧٦|ويتينغهام وبطارية الليثيوم"],
+                    "caption": "قرنان في أربع محطّات",
+                },
+                "keywords": ["timeline history", "archive documents", "invention"],
+            },
+            {
+                "heading": "ثلاثة رجال وجائزة نوبل",
+                "narration": "بطارية الليثيوم الأولى كانت خطرة وغير مستقرّة، فأوقفت إكسون المشروع. هنا دخل جون غودإنَف، وكان أستاذًا في أكسفورد، فاكتشف عام ألف وتسعمئة وثمانين أن استعمال أكسيد الكوبالت كمصعد يضاعف الجهد ويجعل الخليّة أكثر أمانًا. ثم جاء الكيميائي الياباني أكيرا يوشينو فاستبدل الليثيوم المعدني الخطر بمادة كربونية عام ألف وتسعمئة وخمسة وثمانين، فصارت البطارية صالحة للاستعمال اليومي. وفي عام ألفين وتسعة عشر نال الثلاثة جائزة نوبل في الكيمياء معًا. الطريف أن غودإنَف نالها وعمره سبعة وتسعون عامًا، فصار أكبر من حصل عليها في التاريخ.",
+                "visual": {
+                    "type": "profile",
+                    "items": ["جون غودإنَف", "١٩٢٢ — ٢٠٢٣", "أكسيد الكوبالت كمصعد، ١٩٨٠"],
+                    "caption": "نوبل الكيمياء ٢٠١٩",
+                },
+                "keywords": ["chemistry laboratory", "nobel prize", "research scientist"],
+            },
+            {
+                "heading": "ماذا يحدث داخل بطاريتك الآن",
+                "narration": "افتح هاتفك وانظر إلى نسبة الشحن. ما يحدث خلف ذلك الرقم بسيط في جوهره. عند الشحن تُجبَر أيونات الليثيوم على مغادرة طبقة أكسيد الكوبالت والانتقال عبر سائل موصّل لتستقرّ بين طبقات الكربون. وعند الاستعمال تعود الأيونات في الاتجاه المعاكس، ويرافق عودتها سريان الإلكترونات في الدارة الخارجية، وهذا السريان هو ما يشغّل شاشتك. البطارية إذن ليست خزّانًا للكهرباء، بل مكان تذهب إليه الأيونات وتعود.",
                 "visual": {
                     "type": "orbit",
-                    "items": ["إلكترون", "ذرّة معدن", "اصطدام = حرارة"],
-                    "caption": "المقاومة = ازدحام الإلكترونات",
+                    "items": ["أيون ليثيوم", "طبقة كربون", "ذهاب وعودة"],
+                    "caption": "البطارية: ذهاب أيونات وعودتها",
                 },
-                "keywords": ["atoms molecules", "electron particles", "abstract energy"],
+                "keywords": ["lithium ion battery", "smartphone battery", "electrons"],
             },
             {
-                "heading": "الشحن السريع والمقايضة",
-                "narration": "الشحن السريع يدفع طاقة أكبر في الزمن نفسه، والحرارة المتولّدة تتناسب مع مربّع التيار. أي أن مضاعفة التيار لا تضاعف الحرارة، بل تجعلها أربعة أضعاف. لذلك تراقب الهواتف الحديثة حرارتها لحظة بلحظة، وتخفض سرعة الشحن عمدًا كي تحمي البطارية من التلف.",
-                "visual": {
-                    "type": "compare",
-                    "items": ["شحن عادي|حرارة قليلة|عمر أطول", "شحن سريع|حرارة أربعة أضعاف|راحة أكبر"],
-                    "caption": "لا توجد وجبة مجانية في الفيزياء",
-                },
-                "keywords": ["fast charging phone", "smartphone battery", "temperature"],
-            },
-        ],
-        "outro": "في المرة القادمة حين تلمس شاحنًا دافئًا، تذكّر أنك تلمس أثرًا مباشرًا لقانون حفظ الطاقة. الحرارة ليست خطأ في التصميم، بل هي الثمن الذي تدفعه الفيزياء مقابل كل تحويل.",
-        "tags": ["فيزياء", "إلكترونيات", "شاحن", "بطارية", "تعليم", "علوم"],
-    },
-    {
-        "title": "كيف يفكّر المعالج؟",
-        "hook": "داخل هاتفك قطعة سيليكون أصغر من ظفرك، تتخذ مليارات القرارات في الثانية الواحدة. لكنها في الحقيقة لا تعرف سوى شيء واحد: هل يمرّ التيار أم لا؟",
-        "sections": [
-            {
-                "heading": "المفتاح الذي بدّل العالم",
-                "narration": "اللبنة الأساسية للمعالج هي الترانزستور، وهو ببساطة مفتاح كهربائي بلا أجزاء متحرّكة. تضع جهدًا على بوّابته فيسمح للتيار بالمرور، وترفع الجهد فيقطعه. لا شيء أكثر من ذلك. لكن حين تضع عشرات المليارات منها معًا، يولد شيء يشبه التفكير.",
-                "visual": {
-                    "type": "flow",
-                    "items": ["جهد على البوّابة", "قناة موصّلة", "تيار يمرّ", "١", "٠"],
-                    "caption": "الترانزستور: مفتاح بلا حركة",
-                },
-                "keywords": ["microchip closeup", "semiconductor wafer", "circuit board"],
-            },
-            {
-                "heading": "من مفتاح إلى منطق",
-                "narration": "عند ربط عدّة ترانزستورات بترتيب معيّن نحصل على بوّابة منطقية. بوّابة تعطي واحدًا فقط إذا كان المدخلان واحدًا، وأخرى تعطي واحدًا إذا كان أحدهما كذلك. من هذه القواعد البسيطة وحدها يُبنى الجمع، ثم الضرب، ثم كل برنامج استخدمته في حياتك.",
-                "visual": {
-                    "type": "bullets",
-                    "items": ["بوّابة AND: الاثنان معًا", "بوّابة OR: أحدهما يكفي", "بوّابة NOT: اقلب القيمة", "منها يُبنى الحساب كلّه"],
-                    "caption": "المنطق يولد من المفاتيح",
-                },
-                "keywords": ["logic gates", "binary code", "computer chip macro"],
-            },
-            {
-                "heading": "لماذا السرعة لها سقف؟",
-                "narration": "كل مرّة يبدّل الترانزستور حالته يستهلك قليلًا من الطاقة ويطلق قليلًا من الحرارة. وبما أن هذا يحدث مليارات المرّات في الثانية، تصبح الحرارة هي العائق الحقيقي أمام السرعة. ليست الفكرة أن نصنع معالجًا أسرع، بل أن نصنع معالجًا نستطيع تبريده.",
+                "heading": "لماذا تشيخ البطاريات",
+                "narration": "جرّب أن تتذكّر هاتفك بعد عامين من الاستعمال: الشحن نفسه لم يعد يكفي اليوم كلّه. السبب أن كل دورة شحن تترك أثرًا صغيرًا؛ طبقة رقيقة تتراكم على سطح المصعد وتحبس جزءًا من الليثيوم بعيدًا عن الخدمة. الحرارة تسرّع هذا التراكم، ولهذا يضرّ ترك الهاتف في سيارة مشمسة أكثر مما يضرّه الاستعمال المكثّف. الشيخوخة هنا ليست عطلًا، بل حساب تراكمي لا مفرّ منه.",
                 "visual": {
                     "type": "stat",
-                    "items": ["٣ مليار", "عملية تبديل في الثانية", "لكل ترانزستور"],
-                    "caption": "الحرارة هي سقف السرعة",
+                    "items": ["٨٠٪", "من السعة بعد نحو ٥٠٠ دورة", "والحرارة تسرّع ذلك"],
+                    "caption": "كل دورة تترك أثرًا",
                 },
-                "keywords": ["cpu cooling fan", "heatsink computer", "thermal paste"],
-            },
-            {
-                "heading": "الحلّ: التوازي",
-                "narration": "حين عجز المهندسون عن رفع السرعة أكثر، غيّروا السؤال. بدل معالج واحد سريع جدًا، لماذا لا نضع عدّة أنوية تعمل معًا؟ هذا سبب وجود ثمانية أنوية في هاتفك اليوم. لم نكسر حدود الفيزياء، بل التففنا حولها.",
-                "visual": {
-                    "type": "compare",
-                    "items": ["نواة واحدة|سرعة عالية|حرارة خانقة", "عدّة أنوية|سرعة معتدلة|عمل متوازٍ"],
-                    "caption": "لا نكسر الحدود، بل نلتفّ حولها",
-                },
-                "keywords": ["multi core processor", "server datacenter", "silicon chip"],
+                "keywords": ["battery degradation", "phone heat", "charging cycle"],
             },
         ],
-        "outro": "المعالج لا يفكّر في الحقيقة. إنه يفتح ويغلق مفاتيح بسرعة تفوق خيالنا. والذكاء الذي نراه ليس في المفاتيح، بل في الترتيب الذي وضعناها به.",
-        "tags": ["فيزياء", "معالج", "إلكترونيات", "حاسوب", "تعليم", "علوم"],
+        "outro": "من ساق ضفدع في مختبر إيطالي إلى جائزة نوبل بعد مئتين وأربعين عامًا، لم تكن الطريق مستقيمة ولا سريعة. كل محطّة فيها بدأت بشخص رفض أن يمرّ على ملاحظة غريبة دون أن يسأل لماذا. وفي المرّة القادمة حين ترى نسبة الشحن تنقص، تذكّر أنك تحمل في يدك خلاصة قرنين من الفضول.",
+        "tags": ["فيزياء", "بطارية", "تاريخ العلوم", "ليثيوم", "فولتا", "تعليم", "علوم"],
     },
 ]
 
 
-# ---------------------------------------------------------------- Gemini
-
-_PROMPT = """أنت كاتب سيناريو وثائقي علمي بالعربية الفصحى، بنبرة رصينة تشبه الأفلام الوثائقية الكبرى.
-
-اكتب حلقة واحدة عن موضوع من هذا المجال:
-{niche}
-
-قواعد الكتابة الإلزامية:
-- العربية الفصحى فقط، بلا عامية وبلا مزاح.
-- جُمل قصيرة وواضحة. تجنّب الحشو والمبالغات مثل "مذهل" و"لا يُصدّق".
-- ابدأ بخطّاف يطرح سؤالًا أو مفارقة محسوسة من حياة المشاهد اليومية.
-- كل قسم يبني على الذي قبله، وينتهي بفهم جديد لا بمعلومة معزولة.
-- الدقة العلمية مطلقة. لا تذكر رقمًا إلا إن كنت واثقًا منه.
-- اجعل مجموع التعليق مناسبًا لفيديو مدّته نحو {minutes} دقائق.
-- عدد الأقسام بين {min_sections} و {max_sections}.
-
-لكل قسم اختر نوع مشهد بصري من هذه الأنواع فقط:
-- "flow": سلسلة مراحل متتابعة. items = قائمة مراحل مرتّبة (٣ إلى ٥).
-- "bullets": نقاط تُكشف تباعًا. items = قائمة نقاط قصيرة (٣ إلى ٤).
-- "compare": مقارنة بين خيارين. items = عنصران فقط، كل عنصر نص يفصل بين أجزائه رمز | هكذا: "الخيار|الميزة|الثمن".
-- "wave": شرح موجة أو تردد أو إشارة. items = ٢ إلى ٣ تسميات قصيرة.
-- "orbit": ذرّات أو إلكترونات أو جسيمات. items = ٢ إلى ٣ تسميات قصيرة.
-- "stat": رقم واحد كبير. items = ثلاثة عناصر بالترتيب: [الرقم, سطر توضيح, سطر ثانوي].
-
-أعد JSON فقط، بلا أي نص قبله أو بعده، بهذا الشكل بالضبط:
-{{"title":"عنوان الحلقة",
-"hook":"فقرة الخطّاف",
-"sections":[{{"heading":"عنوان القسم","narration":"نص التعليق","visual":{{"type":"flow","items":["..."],"caption":"سطر قصير"}},"keywords":["english term","english term"]}}],
-"outro":"خاتمة من جملتين",
-"tags":["وسم","وسم"]}}
-"""
-
-
-def _call_gemini(cfg):
-    import requests
-
-    key = os.environ.get("GEMINI_API_KEY")
-    if not key:
-        print("[content] لا يوجد GEMINI_API_KEY — سأستعمل حلقة احتياطية.")
-        return None
-
-    ep = cfg["episode"]
-    prompt = _PROMPT.format(
-        niche=cfg["niche"],
-        minutes=ep["target_minutes"],
-        min_sections=ep["min_sections"],
-        max_sections=ep["max_sections"],
-    )
-    body = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.85, "maxOutputTokens": 4096},
-    }
-
-    for model in cfg["gemini"]["models"]:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        try:
-            r = requests.post(url, params={"key": key}, json=body, timeout=120)
-            if r.status_code != 200:
-                print(f"[content] {model} رفض الطلب ({r.status_code})؛ أجرّب التالي.")
-                continue
-            text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-            text = text.strip()
-            for mark in ("```json", "```"):
-                if text.startswith(mark):
-                    text = text[len(mark):]
-            text = text.removesuffix("```").strip()
-            data = json.loads(text)
-            print(f"[content] تم توليد السكريبت عبر {model}")
-            return data
-        except Exception as e:
-            print(f"[content] فشل {model}: {e}")
-    return None
-
-
 # ---------------------------------------------------------------- التحقّق
 
-def _clean(data, cfg):
-    """يضمن أن السكريبت صالح بنيويًا مهما كان مصدره."""
-    ep = cfg["episode"]
-    out = {
-        "title": str(data.get("title") or "حلقة جديدة").strip(),
-        "hook": str(data.get("hook") or "").strip(),
-        "outro": str(data.get("outro") or "").strip(),
-        "tags": [str(t) for t in (data.get("tags") or [])][:12],
-    }
-
-    sections = []
-    for raw in (data.get("sections") or [])[: ep["max_sections"]]:
-        if not isinstance(raw, dict):
-            continue
+def _clean_sections(sections, cfg):
+    out = []
+    for raw in sections[: cfg["episode"]["max_sections"]]:
         narration = str(raw.get("narration") or "").strip()
         if not narration:
             continue
@@ -233,42 +313,65 @@ def _clean(data, cfg):
             vtype = "bullets"
         items = [str(i).strip() for i in (vis.get("items") or []) if str(i).strip()][:5]
         if not items:
-            items = [str(raw.get("heading") or "")] or ["…"]
-        sections.append({
+            items = [str(raw.get("heading") or "…")]
+        out.append({
             "heading": str(raw.get("heading") or "").strip(),
             "narration": narration,
-            "visual": {
-                "type": vtype,
-                "items": items,
-                "caption": str(vis.get("caption") or "").strip(),
-            },
+            "visual": {"type": vtype, "items": items,
+                       "caption": str(vis.get("caption") or "").strip()},
             "keywords": [str(k) for k in (raw.get("keywords") or [])][:4],
         })
-
-    if len(sections) < 2:
-        return None
-    out["sections"] = sections
-    if not out["tags"]:
-        out["tags"] = ["فيزياء", "علوم", "تعليم"]
     return out
 
 
 def build_script(cfg):
-    data = _call_gemini(cfg)
-    script = _clean(data, cfg) if data else None
-    if script is None:
-        script = _clean(random.choice(FALLBACK_EPISODES), cfg)
-        print("[content] استُعملت حلقة احتياطية.")
-    return script
+    outline = _build_outline(cfg)
+
+    if outline:
+        print(f"[content] المخطّط جاهز: {outline.get('title')} "
+              f"— {len(outline['sections'])} أقسام")
+        sections = []
+        for i in range(len(outline["sections"])):
+            sec = _expand_section(outline, i, cfg)
+            if sec:
+                sections.append(sec)
+                print(f"[content] القسم {i+1}/{len(outline['sections'])}: "
+                      f"{sec['heading']} ({len(sec['narration'].split())} كلمة)")
+            else:
+                print(f"[content] تعذّر توسيع القسم {i+1}؛ سأتخطّاه.")
+
+        sections = _clean_sections(sections, cfg)
+        if len(sections) >= 3:
+            return {
+                "source": "gemini",
+                "title": str(outline.get("title") or "حلقة جديدة").strip(),
+                "hook": str(outline.get("hook") or "").strip(),
+                "sections": sections,
+                "outro": str(outline.get("outro") or "").strip(),
+                "tags": [str(t) for t in (outline.get("tags") or [])][:12]
+                        or ["فيزياء", "علوم", "تعليم"],
+            }
+        print("[content] الأقسام الناجحة قليلة؛ سأستعمل الحلقة الاحتياطية.")
+
+    data = random.choice(FALLBACK_EPISODES)
+    print("[content] استُعملت حلقة احتياطية — أقصر من الهدف ولن تُنشر تلقائيًا.")
+    return {
+        "source": "fallback",
+        "title": data["title"],
+        "hook": data["hook"],
+        "sections": _clean_sections(data["sections"], cfg),
+        "outro": data["outro"],
+        "tags": data["tags"],
+    }
 
 
 def build_meta(script, cfg):
-    """وصف ووسوم يوتيوب."""
-    body = [script["hook"], ""]
+    """وصف ووسوم يوتيوب، مع فهرس الأقسام."""
+    body = [script["hook"], "", "— محاور الحلقة —"]
     for s in script["sections"]:
         if s["heading"]:
             body.append(f"• {s['heading']}")
-    body += ["", script["outro"], "", "#فيزياء #علوم #إلكترونيات #تعليم"]
+    body += ["", script["outro"], "", "#فيزياء #علوم #تاريخ_العلوم #إلكترونيات #تعليم"]
     return {
         "title": f"{script['title']} | {cfg['channel_name']}",
         "description": "\n".join(body).strip(),
