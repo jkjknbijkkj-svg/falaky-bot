@@ -7,6 +7,8 @@
 
 import os
 
+import compat  # noqa: F401  — يجب أن يسبق أي استيراد لـmoviepy
+
 
 def _fit(clip, w, h):
     clip = clip.resize(height=h)

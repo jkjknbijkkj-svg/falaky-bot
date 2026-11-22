@@ -1,0 +1,46 @@
+name: تهيئة البيئة
+description: متطلّبات النظام + بايثون + المكتبات + تحقّق يكشف سبب أي فشل
+
+runs:
+  using: composite
+  steps:
+    - name: متطلّبات النظام
+      shell: bash
+      run: |
+        set -e
+        sudo apt-get update -qq
+        # أساسية: لو فشلت واحدة منها فلا فائدة من المتابعة
+        sudo apt-get install -y -qq \
+          ffmpeg pkg-config python3-dev libcairo2-dev libpango1.0-dev
+        # الخطوط: نجرّب كلًّا على حدة ولا نُسقط الوظيفة إن غاب أحدها
+        for f in fonts-hosny-amiri fonts-noto-core fonts-kacst; do
+          sudo apt-get install -y -qq "$f" || echo "::warning::تعذّر تثبيت $f"
+        done
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: pip
+
+    - name: تثبيت المكتبات
+      shell: bash
+      run: |
+        set -e
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: التحقّق من البيئة
+      shell: bash
+      run: |
+        set -e
+        python -c "import sys; print('python ', sys.version.split()[0])"
+        python -c "import PIL; print('pillow ', PIL.__version__)"
+        python -c "import numpy; print('numpy  ', numpy.__version__)"
+        python -c "import moviepy; print('moviepy', moviepy.__version__)"
+        python -c "import manim; print('manim  ', manim.__version__)"
+        python -c "import edge_tts; print('edge-tts ok')"
+        python -c "import arabic_reshaper, bidi; print('arabic text ok')"
+        ffmpeg -version | head -1
+        n=$(fc-list | grep -icE 'amiri|kacst|naskh' || true)
+        echo "خطوط عربية مثبّتة: $n"
+        if [ "$n" -eq 0 ]; then echo "::error::لا يوجد خط عربي"; exit 1; fi
