@@ -1,24 +1,29 @@
 """
-توليد الصوت العربي عبر edge-tts (مجاني، أصوات Microsoft Neural، بلا مفتاح).
-يُرجع مدة المقطع بالثواني، أو None إن فشل (فيُكمل المشروع بفيديو صامت بمدة افتراضية).
+التعليق الصوتي عبر edge-tts (مجاني، بلا مفتاح).
+
+الفرق عن النسخة القديمة: نولّد مقطعًا منفصلًا لكل جزء من الحلقة
+(الخطّاف، كل قسم، الخاتمة). هذا يعطينا مدّة كل جزء قبل الرسم،
+فتتزامن المشاهد مع الكلام بدقّة بدل أن نقسّم الزمن تخمينًا.
 """
 
 import asyncio
 import os
 
 
-async def _synth(text, out_path, voice, rate):
+async def _save(text, out_path, voice, rate, pitch):
     import edge_tts
 
-    communicate = edge_tts.Communicate(text, voice=voice, rate=rate)
-    await communicate.save(out_path)
+    kw = {"voice": voice}
+    if rate:
+        kw["rate"] = rate
+    if pitch:
+        kw["pitch"] = pitch
+    await edge_tts.Communicate(text, **kw).save(out_path)
 
 
 def _duration(path):
-    # نقرأ المدة عبر moviepy (يعتمد على ffmpeg)
     try:
         from moviepy.editor import AudioFileClip
-
         clip = AudioFileClip(path)
         d = clip.duration
         clip.close()
@@ -27,14 +32,37 @@ def _duration(path):
         return None
 
 
-def synth(text, out_path, cfg):
-    voice = cfg["voice"]["edge_voice"]
-    rate = cfg["voice"]["rate"]
-    try:
-        asyncio.run(_synth(text, out_path, voice, rate))
-    except Exception as e:
-        print(f"[voice] تعذّر توليد الصوت ({e})؛ سيكون الفيديو صامتًا.")
-        return None
-    if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
-        return None
-    return _duration(out_path)
+def _synth_one(text, out_path, cfg):
+    v = cfg["voice"]
+    voices = [v["edge_voice"]] + list(v.get("fallback_voices") or [])
+    for voice in voices:
+        try:
+            asyncio.run(_save(text, out_path, voice, v.get("rate"), v.get("pitch")))
+            if os.path.exists(out_path) and os.path.getsize(out_path) > 1024:
+                return _duration(out_path)
+        except Exception as e:
+            print(f"[voice] تعذّر الصوت {voice}: {e}")
+    return None
+
+
+def synth_script(script, cfg, out_dir):
+    """يعيد قائمة أجزاء: [{'key','text','path','duration'}, ...]"""
+    os.makedirs(out_dir, exist_ok=True)
+    blocks = [("intro", script["hook"])]
+    blocks += [(str(i), s["narration"]) for i, s in enumerate(script["sections"])]
+    blocks.append(("outro", script["outro"]))
+
+    parts = []
+    for key, text in blocks:
+        text = (text or "").strip()
+        path = os.path.join(out_dir, f"vo_{key}.mp3")
+        dur = _synth_one(text, path, cfg) if text else None
+        if dur is None:
+            # لا صوت: نعطي مدّة تقديرية من عدد الكلمات حتى لا ينهار الإيقاع
+            dur = max(3.0, len(text.split()) / 2.35)
+            path = None
+            print(f"[voice] الجزء {key} بلا صوت — مدّة تقديرية {dur:.1f}s")
+        parts.append({"key": key, "text": text, "path": path,
+                      "duration": round(float(dur), 2)})
+        print(f"[voice] {key}: {parts[-1]['duration']}s")
+    return parts
