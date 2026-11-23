@@ -2,13 +2,13 @@
 المنظّم — يعمل على مراحل حتى يمكن رسم الأقسام بالتوازي.
 
     python src/main.py                      # كل المراحل بالتتابع (محليًا)
-    python src/main.py --stage script       # السكريبت + الصور + التعليق
+    python src/main.py --stage script       # السكريبت + التعليق + الخط الزمني
     python src/main.py --stage render --index 3
     python src/main.py --stage render --index intro
     python src/main.py --stage assemble     # التركيب (و--publish للرفع)
 
 المرحلة الأولى تكتب output/work/spec.json و spans.json و indices.json،
-ثم يُرسم كل قسم في وظيفة مستقلّة، وأخيرًا تجمعها مرحلة التركيب.
+ثم يرسم كل قسم في وظيفة مستقلّة، وأخيرًا تجمعها مرحلة التركيب.
 """
 
 import argparse
@@ -26,6 +26,8 @@ import audio
 import visuals
 import render
 import portraits
+import align
+import montage
 
 OUT = os.path.join(ROOT, "output")
 WORK = os.path.join(OUT, "work")
@@ -64,8 +66,12 @@ def _report(lines):
 
 # ------------------------------------------------------------ المرحلة الأولى
 
-def build_spec(script, spans, cfg):
-    """مواصفات يقرأها Manim: التصميم + محتوى كل مشهد + مدّته الدقيقة."""
+def build_spec(script, spans, cfg, parts=None):
+    """مواصفات يقرأها Manim: التصميم + محتوى كل مشهد + مدّته الدقيقة.
+
+    هنا يُحسم المونتاج: عبارات اللقطات تُحاذى على توقيت الكلمات الحقيقي،
+    ثم يفرض الدستور ألّا تتجاوز أي لقطة ثلاث ثوان.
+    """
     # مدّة كل مشهد = من بدايته إلى بداية ما بعده (فيبتلع الفاصل)
     durations = []
     for i, s in enumerate(spans):
@@ -74,11 +80,28 @@ def build_spec(script, spans, cfg):
         else:
             durations.append(round(s["duration"], 3))
 
-    sections = [{
-        "heading": sec["heading"],
-        "visual": sec["visual"],
-        "duration": durations[i + 1],      # +1 لأن أوّل جزء هو الخطّاف
-    } for i, sec in enumerate(script["sections"])]
+    word_map = {p["key"]: p.get("words", []) for p in (parts or [])}
+
+    sections = []
+    total_beats, worst = 0, 0.0
+    for i, sec in enumerate(script["sections"]):
+        dur = durations[i + 1]             # +1 لأن أوّل جزء هو الخطّاف
+        beats = align.map_beats(sec.get("beats"), word_map.get(str(i), []), dur)
+        beats = montage.enforce(beats, dur)
+        bad = montage.violations(beats)
+        if bad:
+            print(f"[montage] القسم {i}: {bad[:3]}")
+        total_beats += len(beats)
+        worst = max(worst, max((b["dur"] for b in beats), default=0.0))
+        sections.append({
+            "heading": sec["heading"],
+            "visual": sec["visual"],
+            "beats": beats,
+            "duration": dur,
+        })
+
+    print(f"[montage] {total_beats} لقطة، أطولها {worst:.2f}s "
+          f"(الحدّ {montage.MAX_HOLD}s)")
 
     return {
         "design": cfg["design"],
@@ -109,7 +132,7 @@ def stage_script(cfg):
     spans, total = audio.layout(parts, gap)
     print(f"[script] الطول الكلّي: {total:.1f} ثانية ({total/60:.1f} دقيقة)")
 
-    spec = build_spec(script, spans, cfg)
+    spec = build_spec(script, spans, cfg, parts)
     _write(os.path.join(WORK, "spec.json"), spec)
     _write(os.path.join(WORK, "spans.json"), {"spans": spans, "total": total})
     _write(os.path.join(WORK, "indices.json"), visuals.order_of(spec))
@@ -190,11 +213,11 @@ def stage_assemble(cfg, publish):
             report.append(f"- **رُفع:** {res['url']}")
             report.append(f"- **درجة الظهور:** `{res['privacy']}` — {res['note']}.")
             if forced_private:
-                report.append("- خُفّضت من `public` تلقائيًا لأن السكريبت احتياطي "
+                report.append("- خُفِّضت من `public` تلقائيًا لأن السكريبت احتياطي "
                               "(حلقة ضعيفة لا تُنشر للجمهور).")
             if res["privacy"] == "private":
                 report.append("- لتغييرها: `youtube.privacy` في `config.json` "
-                              "← `unlisted` أو `public`.")
+                              "→ `unlisted` أو `public`.")
         except Exception as e:
             report.append(f"- **فشل الرفع:** {type(e).__name__}: {e}")
             report.append("- الفيديو محفوظ في أثر `episode`.")

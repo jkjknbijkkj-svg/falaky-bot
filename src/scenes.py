@@ -23,6 +23,9 @@ from manim import (
 from manim.utils import rate_functions
 import numpy as np
 
+import draw as DRAW
+import montage as MT
+
 # ------------------------------------------------------------------ الإعداد
 
 SPEC_PATH = os.environ.get("FALAKY_SPEC", "output/spec.json")
@@ -100,6 +103,10 @@ def _portrait_path():
         return None
     full = os.path.join(os.path.dirname(os.path.abspath(SPEC_PATH)), rel)
     return full if os.path.exists(full) else None
+
+
+PALETTE = {"bg": BG, "surface": SURFACE, "accent": ACCENT,
+           "warm": ACCENT_W, "text": TEXT, "muted": MUTED}
 
 
 class _Base(Scene):
@@ -370,7 +377,7 @@ class _Timeline(_Base):
 
 
 class _Profile(_Base):
-    """بطاقة عالِم: الاسم، سنوات حياته، وإسهامه، مع صورته إن توفّرت حرّة."""
+    """بطاقة عالِم: الاسم، سنوات حياته، وإسهامه. بلا صور — هوية خطّية فقط."""
 
     def build(self, items, total):
         vals = [str(i).strip() for i in items if str(i).strip()][:3]
@@ -456,7 +463,52 @@ class _Title(_Base):
         self.finish(total)
 
 
+class _Beats(_Base):
+    """سلسلة لقطات مرسومة، كل لقطة مربوطة بالعبارة التي تُقال أثناءها.
+
+    هذا هو المونتاج الذي يتبع الكلام: لا شاشة تبقى على حالها، ولا لقطة
+    تتجاوز ثلاث ثوان، والرسم يسبق الكلمة بلحظة لأن العين أسرع من الأذن.
+    """
+
+    def build(self, beats, total):
+        if not beats:
+            self.finish(total)
+            return
+
+        for b in beats:
+            dur = max(float(b.get("dur", MT.MIN_HOLD)), 0.25)
+            dur = min(dur, MT.MAX_HOLD)          # الحدّ لا يُتجاوز أبدًا
+
+            # الرسوم مبنيّة بـalways_redraw: محدّثها يعيد بناءها كل إطار،
+            # فأي move_to أو FadeIn عليها يُمحى فورًا. نضيفها كما هي،
+            # والرسم نفسه مُصمَّم حول المركز، والتسمية تُوضع بإحداثيّ ثابت.
+            tracker = ValueTracker(0.0)
+            art = DRAW.get(b.get("draw"))(PALETTE, tracker)
+            self.add(art)
+
+            label = _fit_w(_txt(b.get("label", ""), 34, TEXT),
+                           config.frame_width - 3.4)
+            used = 0.0
+            if _alive(label):
+                label.move_to(ORIGIN + DOWN * 2.45)
+                fade = min(0.22, dur * 0.3)
+                self.play_t(FadeIn(label, shift=UP * 0.15), run_time=fade)
+                used = fade
+
+            self.play_t(tracker.animate.set_value(1.0),
+                        run_time=max(dur - used, 0.05),
+                        rate_func=rate_functions.linear)
+
+            art.clear_updaters()
+            self.remove(art)
+            if _alive(label):
+                self.remove(label)
+
+        self.finish(total)
+
+
 _BUILDERS = {
+    "beats": _Beats,
     "flow": _Flow, "bullets": _Bullets, "compare": _Compare,
     "wave": _Wave, "orbit": _Orbit, "stat": _Stat,
     "timeline": _Timeline, "profile": _Profile, "figure": _Profile,
@@ -473,9 +525,17 @@ def _resolve():
         VISUAL = {}
         return "title", block["items"], "", block.get("caption", ""), block["duration"]
     sec = SPEC["sections"][int(INDEX)]
-    v = sec["visual"]
+    v = sec.get("visual", {})
     VISUAL = v
-    return (v["type"], v["items"], sec.get("heading", ""),
+
+    # اللقطات هي الأصل: مونتاج يتبع الكلام. البطاقات تبقى للأقسام التي
+    # لم يُولَّد لها لقطات (أو حين يتعذّر النموذج).
+    beats = sec.get("beats")
+    if beats:
+        return ("beats", beats, sec.get("heading", ""),
+                v.get("caption", ""), sec["duration"])
+
+    return (v.get("type", "bullets"), v.get("items", []), sec.get("heading", ""),
             v.get("caption", ""), sec["duration"])
 
 
