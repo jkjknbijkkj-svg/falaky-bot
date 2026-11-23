@@ -28,6 +28,7 @@ import render
 import portraits
 import align
 import montage
+import sfx
 
 OUT = os.path.join(ROOT, "output")
 WORK = os.path.join(OUT, "work")
@@ -167,8 +168,16 @@ def stage_assemble(cfg, publish):
             segments.append(visuals.render_one(
                 spec, os.path.join(WORK, "spec.json"), cfg, WORK, idx))
 
+    sfx_path = None
+    try:
+        sfx_path = sfx.build(spec, spans, total, cfg,
+                             os.path.join(WORK, "sfx.wav"))
+    except Exception as e:
+        print(f"[sfx] تعذّر بناء طبقة المؤثّرات ({type(e).__name__}: {e}) — "
+              f"سأكمل بالتعليق وحده.")
+
     video_path = os.path.join(OUT, "video.mp4")
-    render.assemble(segments, spans, total, cfg, video_path)
+    render.assemble(segments, spans, total, cfg, video_path, sfx_path)
 
     meta = _read(os.path.join(OUT, "meta.json"))
     script = _read(os.path.join(OUT, "script.json"))
