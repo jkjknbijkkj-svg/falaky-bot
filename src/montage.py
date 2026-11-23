@@ -120,18 +120,93 @@ def enforce(beats, total, max_hold=MAX_HOLD, min_hold=MIN_HOLD):
         if span <= 0:
             continue
 
-        # القاعدة الأولى: لا شيء يتجاوز ثلاث ثوان — نكسرها إلى أجزاء متساوية
-        parts = max(1, int(-(-span // max_hold)))     # ceil
-        part = span / parts
-        for p in range(parts):
+        # القاعدة الأولى: لا شيء يتجاوز ثلاث ثوان — نكسرها، لكن بإيقاع متنوّع
+        cuts = _slice(span, i, max_hold, min_hold)
+        # نُدوّر المواضع ثم نشتقّ المدد من الفروق، فلا يتسرّب خطأ التقريب:
+        # تدوير كل مدّة على حدة كان يُنقِص ثوانيَ مِللية تتراكم على طول القسم
+        ats = [round(b["at"] + off, 3) for off, _ in cuts] + [round(b["at"] + span, 3)]
+        for p in range(len(cuts)):
             out.append({
-                "at": round(b["at"] + p * part, 3),
-                "dur": round(part, 3),
+                "at": ats[p],
+                "dur": round(ats[p + 1] - ats[p], 3),
                 "draw": b.get("draw") or "pulse",
                 "label": b.get("label", "") if p == 0 else "",
                 "say": b.get("say", "") if p == 0 else "",
                 "split": p > 0,                        # جزء مكمّل لا لقطة جديدة
             })
+    return _break_monotony(out, min_hold)
+
+
+def _break_monotony(beats, min_hold, run=3, tol=0.15, floor=0.6):
+    """يكسر سلاسل اللقطات المتساوية الطول.
+
+    اللقطات الأقصر من الحدّ لا تُقسَّم أصلًا، فإن جاءت عبارات النموذج
+    متساوية الطول خرج المونتاج منتظمًا رغم احترامه للقاعدة. هنا نقسم
+    الوسطى من كل سلسلة متماثلة إلى نصفين — والنصفان داخل العبارة نفسها
+    فلا ينفكّ القطع عن الكلمة، والثاني مُعلَّم split فلا تتكرّر التسمية.
+    """
+    i, out = 0, list(beats)
+    k = 0
+    while k + run <= len(out):
+        window = out[k:k + run]
+        d0 = window[0]["dur"]
+        if all(abs(b["dur"] - d0) <= tol for b in window) and d0 / 2 >= floor:
+            mid = k + run // 2
+            b = out[mid]
+            # نُنوّع نسبة القَسم وإلا خرجت كل الأنصاف بالطول نفسه،
+            # فاستبدلنا انتظامًا بانتظام آخر
+            half = round(b["dur"] * (0.5, 0.40, 0.58)[i % 3], 3)
+            if min(half, b["dur"] - half) < floor:
+                half = round(b["dur"] / 2, 3)
+            second = {**b, "at": round(b["at"] + half, 3),
+                      "dur": round(b["dur"] - half, 3),
+                      "label": "", "say": "", "split": True}
+            out[mid] = {**b, "dur": half}
+            out.insert(mid + 1, second)
+            k = mid + 2
+            i += 1
+        else:
+            k += 1
+    if i:
+        print(f"[montage] كُسرت {i} سلسلة متماثلة الإيقاع")
+    return out
+
+
+# نمط الإيقاع: نِسَب تتكرّر دوريًا فتتنوّع أطوال اللقطات بلا عشوائية.
+# الانتظام الميكانيكي (كل لقطة ٣٫٠٠s بالضبط) علامة هواة بقدر اللقطة الساكنة
+# الطويلة؛ الأذن تتعب من النبض الثابت كما تتعب العين من الصورة الجامدة.
+_PULSE = (1.00, 0.74, 0.90, 0.64, 0.82, 1.00, 0.70)
+
+
+def _slice(span, seed, max_hold, min_hold):
+    """يقسّم مدّة إلى أجزاء متنوّعة الأطوال، لا يتجاوز أيٌ منها الحدّ.
+
+    يعيد [(الإزاحة، المدّة), …] ومجموع المدد = span بالضبط.
+    """
+    if span <= max_hold + 1e-9:
+        return [(0.0, span)]
+
+    # أطول جزء يساوي (span/n) × (أعلى وزن ÷ متوسّط الأوزان)، فنحسب n ابتداءً
+    # من هذه النسبة. الزيادة الخطوة-خطوة كانت تعجز عن اللحاق في الأقسام
+    # الطويلة فتسقط إلى التقسيم المتساوي — أي إلى الانتظام الذي نهرب منه.
+    ratio = max(_PULSE) / (sum(_PULSE) / len(_PULSE))
+    n = max(1, int(-(-span * ratio // max_hold)))   # ceil
+    for _ in range(8):                              # نزيد الأجزاء حتى تسع الحدّ
+        w = [_PULSE[(seed + k) % len(_PULSE)] for k in range(n)]
+        s = sum(w)
+        parts = [span * x / s for x in w]
+        if max(parts) <= max_hold + 1e-9 and min(parts) >= min(min_hold, span / n):
+            break
+        n += 1
+    else:
+        parts = [span / n] * n                      # تعذّر التنويع: تقسيم متساوٍ
+
+    out, t = [], 0.0
+    for k, part in enumerate(parts):
+        # آخر جزء يُنهي المدّة بالضبط فلا يتراكم خطأ التقريب
+        part = span - t if k == len(parts) - 1 else part
+        out.append((t, part))
+        t += part
     return out
 
 

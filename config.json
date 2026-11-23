@@ -1,21 +1,17 @@
 {
   "channel_name": "فيزياء الأجهزة",
-
   "niche": "فيزياء الأجهزة الكهربائية والإلكترونية اليومية: كيف يعمل المعالج، البطارية، الشاحن، المحرّك الكهربائي، الشاشة، الميكروويف، السيارة الكهربائية",
-
   "episode": {
     "target_minutes": 22,
     "min_sections": 10,
     "max_sections": 14,
     "words_per_section": 260
   },
-
   "video": {
     "width": 1920,
     "height": 1080,
     "fps": 30
   },
-
   "design": {
     "bg": "#0B1020",
     "surface": "#161F3C",
@@ -31,45 +27,66 @@
       "/usr/share/fonts/truetype/kacst/KacstOne.ttf"
     ]
   },
-
   "audio": {
     "music_path": "assets/music.mp3",
     "music_gain_speech": 0.07,
     "music_gain_gap": 0.26,
     "duck_attack": 0.25,
-    "duck_release": 0.65
+    "duck_release": 0.65,
+    "sfx_gain": 0.5
   },
-
   "voice": {
     "edge_voice": "ar-SA-HamedNeural",
-    "fallback_voices": ["ar-EG-ShakirNeural", "ar-SA-ZariyahNeural", "ar-EG-SalmaNeural"],
+    "fallback_voices": [
+      "ar-EG-ShakirNeural",
+      "ar-SA-ZariyahNeural",
+      "ar-EG-SalmaNeural"
+    ],
     "rate": "-7%",
     "pitch": "-2Hz",
     "section_gap_seconds": 0.55
   },
-
   "render": {
     "manim_timeout_seconds": 2400
   },
-
   "portraits": {
     "_note": "صور العلماء من ويكيميديا — حرّة الترخيص فقط، مع ذكر المصدر في الوصف",
     "enabled": true
   },
-
   "youtube": {
     "_privacy": "private = خاص لا يراه أحد | unlisted = بالرابط فقط | public = منشور للجميع",
     "privacy": "private",
     "category_id": "28"
   },
-
   "footage": {
     "enabled": false,
     "max_clips": 6,
     "accent_seconds": 3.2
   },
-
   "gemini": {
-    "models": ["gemini-3.6-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    "models": [
+      "gemini-3.6-flash",
+      "gemini-2.0-flash",
+      "gemini-1.5-flash"
+    ]
+  },
+  "sfx": {
+    "_note": "التصميم الصوتي مُولّد بالكود — لا ملفات ولا تراخيص",
+    "enabled": true,
+    "ambience_gain": 0.16
+  },
+  "finish": {
+    "_note": "اللمسة النهائية بـFFmpeg. الحبيبة (grain) تكلفة نحو ثلث زمن التشغيل — اجعلها 0 لتسريع الإنتاج",
+    "enabled": true,
+    "saturation": 1.1,
+    "contrast": 1.03,
+    "black_lift": 0.012,
+    "bloom": 0.22,
+    "bloom_sigma": null,
+    "vignette": 0.85,
+    "grain": 4,
+    "preset": "medium",
+    "crf": 20,
+    "timeout_seconds": 5400
   }
 }
