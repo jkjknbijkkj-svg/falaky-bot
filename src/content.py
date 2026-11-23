@@ -24,6 +24,8 @@ import json
 import os
 import random
 
+import montage
+
 VISUAL_TYPES = ("flow", "bullets", "compare", "wave", "orbit", "stat",
                 "timeline", "profile", "quote")
 
@@ -94,11 +96,42 @@ _SECTION_PROMPT = """أنت تكتب قسمًا واحدًا من حلقة وث�
 - profile: ثلاثة عناصر: [اسم العالِم, "سنة الميلاد — سنة الوفاة", إسهامه في سطر].
 - quote: عنصران: [نصّ الاقتباس القصير, اسم قائله].
 
+{montage}
+
 أعد JSON فقط:
 {{"narration":"نص التعليق",
 "visual":{{"type":"{visual_type}","items":["..."],"caption":"سطر قصير يلخّص المشهد"}},
+"beats":[{{"say":"عبارة منسوخة حرفيًا من نصّ التعليق","draw":"train","label":"تسمية قصيرة"}}],
 "keywords":["english term","english term"]}}
 """
+
+# -------------------------------------------------- رسالة التسليم بين المفاتيح
+
+HANDOFF = {"title": "", "done": [], "pending": []}
+
+
+def handoff_text():
+    """ما يتركه المفتاح المستنفَد للمفتاح التالي: ما أُنجز وما بقي وكيف يُكمَل."""
+    if not HANDOFF["done"] and not HANDOFF["pending"]:
+        return ""
+    done = "، ".join(HANDOFF["done"]) or "لا شيء بعد"
+    left = "، ".join(HANDOFF["pending"]) or "لا شيء"
+    return f"""
+--- رسالة تسليم من المفتاح السابق (نفدت حصّته) ---
+الحلقة: {HANDOFF['title']}
+أُنجز بالفعل ({len(HANDOFF['done'])} قسمًا): {done}
+لم يُنجَز بعد ({len(HANDOFF['pending'])} قسمًا): {left}
+كيف تُكمل: اكتب القسم المطلوب في هذا الطلب فقط. حافظ على النبرة الوثائقية
+نفسها، ولا تُعِد شرح ما غُطّي في الأقسام المنجزة، وابنِ عليه مباشرةً.
+--- انتهت رسالة التسليم ---
+"""
+
+
+def set_progress(title, done, pending):
+    HANDOFF["title"] = title
+    HANDOFF["done"] = list(done)
+    HANDOFF["pending"] = list(pending)
+
 
 _KEY_NAMES = ("GEMINI_API_KEY", "GEMINI_API_KEY_2", "GEMINI_API_KEY2",
               "GEMINI_API_KEY_3", "GEMINI_API_KEY3")
@@ -139,16 +172,24 @@ def _gemini(prompt, cfg, max_tokens=4096, temperature=0.8):
         print("[content] لا يوجد أي مفتاح Gemini.")
         return None
 
-    body = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": temperature,
-                             "maxOutputTokens": max_tokens},
-    }
     models = cfg["gemini"]["models"]
 
     for ki, key in enumerate(keys, 1):
         if key in _EXHAUSTED:
             continue
+
+        # المفتاح الذي يرث العمل يقرأ أولًا ما أنجزه سلفه وما بقي عليه
+        text_in = prompt
+        if _EXHAUSTED:
+            note = handoff_text()
+            if note:
+                text_in = note + "\n" + prompt
+        body = {
+            "contents": [{"parts": [{"text": text_in}]}],
+            "generationConfig": {"temperature": temperature,
+                                 "maxOutputTokens": max_tokens},
+        }
+
         quota_hits = 0
         for model in models:
             url = ("https://generativelanguage.googleapis.com/v1beta/models/"
@@ -237,8 +278,9 @@ def _expand_section(outline, idx, cfg):
         rules=_RULES,
         words=ep.get("words_per_section", 260),
         visual_type=stub["visual_type"],
+        montage=montage.prompt_block(montage.DRAW_NAMES),
     )
-    data = _gemini(prompt, cfg, max_tokens=3072, temperature=0.75)
+    data = _gemini(prompt, cfg, max_tokens=8192, temperature=0.75)
     if not data or not str(data.get("narration") or "").strip():
         return None
 
@@ -255,8 +297,24 @@ def _expand_section(outline, idx, cfg):
         "narration": str(data["narration"]).strip(),
         "visual": {"type": vtype, "items": items,
                    "caption": str(vis.get("caption") or "").strip()},
+        "beats": clean_beats(data.get("beats")),
         "keywords": [str(k) for k in (data.get("keywords") or [])][:4],
     }
+
+
+def clean_beats(raw):
+    """يقبل اللقطات ويضبط أسماء الرسوم على الفهرس المتاح."""
+    out = []
+    for b in (raw or [])[:80]:
+        if not isinstance(b, dict):
+            continue
+        say = str(b.get("say") or "").strip()
+        d = str(b.get("draw") or "").strip().lower()
+        if d not in montage.DRAW_NAMES:
+            d = "pulse"
+        out.append({"say": say, "draw": d,
+                    "label": str(b.get("label") or "").strip()[:40]})
+    return out
 
 
 # ---------------------------------------------------------------- الاحتياطي
@@ -264,7 +322,7 @@ def _expand_section(outline, idx, cfg):
 FALLBACK_EPISODES = [
     {
         "title": "البطارية: قصّة قرنين من مطاردة الكهرباء",
-        "hook": "في جيبك الآن جهاز يختزن طاقة تكفي لتشغيل مصباح ساعات طويلة، في حجم قطعة بسكويت. لم يسقط هذا من السماء. وراءه سلسلة من المصادفات والخلافات العلمية امتدّت أكثر من قرنين. وأغربها أن كل شيء بدأ بساقَي ضفدع ميّت.",
+        "hook": "في جيبك الآن جهاز يختزن طاقة تكفي لتشغيل مصباح ساعات طويلة، في حجم قطعة بسكويت. لم يسقط هذا من السماء. ورائه سلسلة من المصادفات والخلافات العلمية امتدّت أكثر من قرنين. وأغربها أن كل شيء بدأ بساقَي ضفدع ميّت.",
         "sections": [
             {
                 "heading": "ساقا الضفدع",
@@ -298,7 +356,7 @@ FALLBACK_EPISODES = [
             },
             {
                 "heading": "من الفضول إلى الاستعمال",
-                "narration": "بقي العمود الفولتي لعقود أداة مختبر لا أكثر. المشكلة أنه ينفد ولا يُشحن. وفي عام ألف وثمانمئة وتسعة وخمسين قدّم الفرنسي غاستون بلانتيه حلًّا مختلفًا: خليّة من الرصاص وحمض الكبريتيك يمكن إعادة شحنها مرّات ومرّات. هذه هي البطارية القابلة للشحن الأولى، وهي نفسها التي تدير سيارتك اليوم بعد أكثر من قرن ونصف. تخيّل اختراعًا تستعمله يوميًا ولم يتغيّر مبدؤه منذ عهد نابليون الثالث.",
+                "narration": "بقي العمود الفولتي لعقود أداة مختبر لا أكثر. المشكلة أنه ينفد ولا يُشحن. وفي عام ألف وثمانمئة وتسعة وخمسين قدّم الفرنسي غاستون بلانتيه حلًّا مختلفًا: خليّة من الرصاص وحمض الكبريتيك يمكن إعادة شحنها مرّات ومرّات. هذه هي البطارية القابلة للشحن الأولى، وهي نفسها التي تدير سيارتك اليوم بعد أكثر من قرن ونصف. تخيّل اختراعًا تستعمله يوميًا ولم يتغيّر مبدأه منذ عهد نابليون الثالث.",
                 "visual": {
                     "type": "compare",
                     "items": ["عمود فولتا|تيار مستمرّ أول مرّة|ينفد ولا يُشحن", "خليّة بلانتيه|قابلة للشحن|ثقيلة جدًا"],
@@ -373,6 +431,7 @@ def _clean_sections(sections, cfg):
             "narration": narration,
             "visual": {"type": vtype, "items": items,
                        "caption": str(vis.get("caption") or "").strip()},
+            "beats": clean_beats(raw.get("beats")),
             "keywords": [str(k) for k in (raw.get("keywords") or [])][:4],
         })
     return out
@@ -386,7 +445,11 @@ def build_script(cfg):
         print(f"[content] المخطّط جاهز: {outline.get('title')} "
               f"— {len(outline['sections'])} أقسام")
         sections = []
+        heads = [s["heading"] for s in outline["sections"]]
         for i in range(len(outline["sections"])):
+            # نحدّث سجلّ التقدّم قبل كل قسم: إن نفدت الحصّة الآن، يجد
+            # المفتاح التالي رسالة تقول له ما أُنجز وما بقي وكيف يُكمل.
+            set_progress(outline.get("title", ""), heads[:i], heads[i:])
             sec = _expand_section(outline, i, cfg)
             if sec:
                 sections.append(sec)
@@ -421,7 +484,7 @@ def build_script(cfg):
 
 
 def build_meta(script, cfg):
-    """وصف ووسوم يوتيوب، مع فهرس الأقسام ونسب الصور."""
+    """وصف ووسوم يوتيوب، مع فهرس الأقسام."""
     body = [script["hook"], "", "— محاور الحلقة —"]
     for s in script["sections"]:
         if s["heading"]:
