@@ -33,27 +33,39 @@ def _gain_curve(spans, total, cfg_audio):
     atk = float(cfg_audio.get("duck_attack", 0.25))
     rel = float(cfg_audio.get("duck_release", 0.65))
 
-    pts = [(0.0, hi)]
+    # الفاصل بين الأقسام (٠٫٥s) أقصر من زمن التحلّل (٠٫٦٥s)، فنقطة ارتفاع
+    # القسم السابق كانت تقع **داخل** كلام القسم التالي: تُرتّب القائمة
+    # فتُدرَج (end+0.65, hi) بعد (start, lo)، فترتفع الموسيقى فوق أوّل
+    # جملة من كل قسم. القياس أظهر ٠٫١٦٥ أثناء الكلام بدل ٠٫٠٧.
+    #
+    # الصواب أن تُدمَج المكابس بأخذ **الأدنى** من أغلفتها، لا بوصل نقاطها:
+    # ما دام أحدها يكبس، فالموسيقى مكبوسة.
+    bounds = {0.0, float(total)}
     for s in spans:
-        pts.append((max(s["start"] - atk, 0.0), hi))
-        pts.append((s["start"], lo))
-        pts.append((s["end"], lo))
-        pts.append((min(s["end"] + rel, total), hi))
-    pts.append((total, hi))
+        for x in (s["start"] - atk, s["start"], s["end"], s["end"] + rel):
+            bounds.add(min(max(float(x), 0.0), float(total)))
+    xs = np.array(sorted(bounds))
 
-    pts.sort(key=lambda p: p[0])
-    xs, ys = [], []
-    for x, y in pts:
-        if xs and abs(x - xs[-1]) < 1e-4:
-            ys[-1] = min(ys[-1], y)
-            continue
-        xs.append(x)
-        ys.append(y)
-    return np.array(xs), np.array(ys)
+    def one(span, t):
+        a, b = span["start"], span["end"]
+        if t <= a - atk or t >= b + rel:
+            return hi
+        if a <= t <= b:
+            return lo
+        if t < a:                                   # هبوط قبل الكلام
+            return hi + (lo - hi) * (t - (a - atk)) / max(atk, 1e-6)
+        return lo + (hi - lo) * (t - b) / max(rel, 1e-6)   # ارتفاع بعده
+
+    ys = np.array([min([one(s, t) for s in spans], default=hi) for t in xs])
+    return xs, ys
 
 
-def build(spans, total, cfg):
-    """يعيد مقطعًا صوتيًا كاملًا للفيديو (أو None)."""
+def build(spans, total, cfg, sfx_path=None):
+    """يعيد مقطعًا صوتيًا كاملًا للفيديو (أو None).
+
+    ثلاث طبقات: التعليق، وطبقة التصميم الصوتي المرصوفة على اللقطات،
+    والموسيقى التي تنخفض تحت الكلام.
+    """
     from moviepy.editor import AudioFileClip, CompositeAudioClip
 
     a = cfg.get("audio", {})
@@ -65,6 +77,15 @@ def build(spans, total, cfg):
                 tracks.append(AudioFileClip(s["path"]).set_start(s["start"]))
             except Exception as e:
                 print(f"[audio] تعذّر تحميل {s['key']}: {e}")
+
+    if sfx_path and os.path.exists(sfx_path):
+        try:
+            g = float(a.get("sfx_gain", 0.5))
+            clip = AudioFileClip(sfx_path).volumex(g).set_start(0)
+            tracks.append(clip)
+            print(f"[audio] طبقة التصميم الصوتي مُضافة (كسب {g})")
+        except Exception as e:
+            print(f"[audio] تجاهل طبقة المؤثّرات: {e}")
 
     music_path = a.get("music_path")
     if music_path and os.path.exists(music_path):
