@@ -49,6 +49,12 @@
   "render": {
     "manim_timeout_seconds": 2400
   },
+  "camera": {
+    "_note": "حركة كاميرا بطيئة (Ken Burns) فوق كل مشهد. zoom = النسبة على طول المشهد. direction: in أو out أو alternate (يتناوب بين المشاهد).",
+    "enabled": true,
+    "zoom": 0.03,
+    "direction": "alternate"
+  },
   "portraits": {
     "_note": "صور العلماء من ويكيميديا — حرّة الترخيص فقط، مع ذكر المصدر في الوصف",
     "enabled": true
@@ -56,7 +62,16 @@
   "youtube": {
     "_privacy": "private = خاص لا يراه أحد | unlisted = بالرابط فقط | public = منشور للجميع",
     "privacy": "private",
-    "category_id": "28"
+    "category_id": "28",
+    "default_language": "ar"
+  },
+  "multilingual": {
+    "_note": "لغات إضافية تُولَّد لكل حلقة: عنوان ووصف موطّنان + ترجمة SRT + تعليق صوتي MP3 (أثر GitHub لرفعه يدويًا كمسار صوت ثانٍ من Studio). يُضاعف الاستهلاك ~N× مفاتيح Gemini و TTS لكل لغة.",
+    "enabled": true,
+    "languages": ["en"],
+    "voices": {
+      "en": "en-US-GuyNeural"
+    }
   },
   "footage": {
     "enabled": false,
