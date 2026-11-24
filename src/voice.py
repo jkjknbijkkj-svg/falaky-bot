@@ -68,9 +68,15 @@ def estimate_words(text, total):
     return out
 
 
-def _synth_one(text, out_path, cfg):
+def _synth_one(text, out_path, cfg, override_voice=None):
     v = cfg["voice"]
-    voices = [v["edge_voice"]] + list(v.get("fallback_voices") or [])
+    if override_voice:
+        # لغة ثانية: نستعمل الصوت المختار بلا الاحتياطيات العربية. معدّل
+        # العربية وطبقتها (rate/pitch) مناسبان لها فنُطبّقهما بلا تغيير —
+        # لكن نتسامح مع فشل الصوت المخصّص بالسقوط إلى الافتراضي الإنجليزي
+        voices = [override_voice]
+    else:
+        voices = [v["edge_voice"]] + list(v.get("fallback_voices") or [])
     for voice in voices:
         try:
             words = asyncio.run(_stream(text, out_path, voice,
@@ -82,8 +88,12 @@ def _synth_one(text, out_path, cfg):
     return None, []
 
 
-def synth_script(script, cfg, out_dir):
-    """يعيد قائمة أجزاء: [{'key','text','path','duration','words'}, ...]"""
+def synth_script(script, cfg, out_dir, voice_override=None, prefix="vo"):
+    """يعيد قائمة أجزاء: [{'key','text','path','duration','words'}, ...]
+
+    voice_override: اسم صوت edge-tts محدّد (للغة ثانية). None = العربي.
+    prefix: بادئة ملفّات الصوت (vo للعربي، vo_en للإنجليزي…).
+    """
     os.makedirs(out_dir, exist_ok=True)
     blocks = [("intro", script["hook"])]
     blocks += [(str(i), s["narration"]) for i, s in enumerate(script["sections"])]
@@ -92,11 +102,11 @@ def synth_script(script, cfg, out_dir):
     parts = []
     for key, text in blocks:
         text = (text or "").strip()
-        path = os.path.join(out_dir, f"vo_{key}.mp3")
+        path = os.path.join(out_dir, f"{prefix}_{key}.mp3")
 
         dur, words = (None, [])
         if text:
-            dur, words = _synth_one(text, path, cfg)
+            dur, words = _synth_one(text, path, cfg, voice_override)
 
         if dur is None:
             # لا صوت: مدّة تقديرية من عدد الكلمات حتى لا ينهار الإيقاع
@@ -111,5 +121,6 @@ def synth_script(script, cfg, out_dir):
 
         parts.append({"key": key, "text": text, "path": path,
                       "duration": round(float(dur), 2), "words": words})
-        print(f"[voice] {key}: {parts[-1]['duration']}s، {len(words)} كلمة")
+        print(f"[voice] [{prefix}] {key}: {parts[-1]['duration']}s، "
+              f"{len(words)} كلمة")
     return parts

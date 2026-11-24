@@ -29,6 +29,9 @@ import portraits
 import align
 import montage
 import sfx
+import subs
+import chapters
+import translate as _translate
 
 OUT = os.path.join(ROOT, "output")
 WORK = os.path.join(OUT, "work")
@@ -139,8 +142,123 @@ def stage_script(cfg):
     _write(os.path.join(WORK, "indices.json"), visuals.order_of(spec))
     _write(os.path.join(OUT, "script.json"), script)
     _write(os.path.join(OUT, "meta.json"), content.build_meta(script, cfg))
+
+    # ترجمة العربية الدقيقة — مبنيّة من توقيت الكلمات الذي سمعه edge-tts
+    # فعلًا، لا من التسميات التلقائية الضعيفة للعربية في يوتيوب
+    subs.build(spans, parts, os.path.join(OUT, "subs_ar.srt"))
+
     print(f"[script] {len(visuals.order_of(spec))} مشهدًا جاهزًا للرسم.")
     return spec
+
+
+# ------------------------------------------------- مرحلة اللغات الإضافية
+
+def stage_multilingual(cfg):
+    """يولّد لكل لغة إضافية: ترجمة سكريبت + تعليق صوتي + SRT + بيانات موطّنة.
+
+    الصوت المُولَّد يُحفظ في output/audio_<lang>.mp3 (أثر GitHub) لترفعه
+    يدويًا كمسار صوت ثانٍ من YouTube Studio ← إضافة لغة. هذه الخطوة
+    اليدوية الوحيدة — يوتيوب لا يفتح رفع المسارات متعدّدة الصوت عبر API.
+    """
+    ml = cfg.get("multilingual", {})
+    if not ml.get("enabled"):
+        return {"localizations": {}, "captions": {}, "audio_tracks": {}}
+
+    langs = ml.get("languages", [])
+    if not langs:
+        return {"localizations": {}, "captions": {}, "audio_tracks": {}}
+
+    script = _read(os.path.join(OUT, "script.json"))
+    meta = _read(os.path.join(OUT, "meta.json"))
+    sp = _read(os.path.join(WORK, "spans.json"))
+    spans = sp["spans"]
+    voices_map = ml.get("voices", {})
+
+    localizations, captions, audio_tracks = {}, {}, {}
+
+    # نحفظ الترجمة العربية أيضًا ضمن captions للرفع
+    ar_srt = os.path.join(OUT, "subs_ar.srt")
+    if os.path.exists(ar_srt):
+        captions["ar"] = ar_srt
+
+    for lang in langs:
+        print(f"\n[multilingual] === {lang} ({_translate.language_name(lang)}) ===")
+
+        # ١) ترجمة السكريبت
+        tr_script = _translate.translate_script(script, lang, cfg)
+        if not tr_script:
+            print(f"[multilingual] تعذّرت ترجمة {lang} — سأتخطّاه.")
+            continue
+        _write(os.path.join(OUT, f"script_{lang}.json"), tr_script)
+
+        # ٢) تعليق صوتي باللغة الهدف — نفس بنية الأجزاء
+        tr_voice = voices_map.get(lang)
+        if not tr_voice:
+            print(f"[multilingual] لا صوت مُعرَّف للغة {lang} — سأتخطّاه.")
+            continue
+        tr_parts = voice.synth_script(tr_script, cfg,
+                                      os.path.join(WORK, f"audio_{lang}"),
+                                      voice_override=tr_voice,
+                                      prefix=f"vo_{lang}")
+
+        # ٣) الخطّ الزمني للترجمة قد يختلف عن العربي، لكن لـYouTube نحتاج
+        # ترجمة محاذية للفيديو العربي الأصلي. نُعيد قياس spans للترجمة
+        # على نفس النسبة حتى يبقى الظهور متزامنًا.
+        gap = float(cfg["voice"].get("section_gap_seconds", 0.5))
+        tr_spans, tr_total = audio.layout(tr_parts, gap)
+        # قياس خطّي بسيط: SRT هنا للعرض النصّي فوق الصوت العربي الأصلي
+        # (قاعدة يوتيوب: subtitles تعرض نصّيًا لا تُغيّر توقيت الفيديو)
+        original_total = sp["total"]
+        if tr_total > 0 and original_total > 0:
+            scale = original_total / tr_total
+            scaled_spans = [{**s, "start": round(s["start"] * scale, 3),
+                             "duration": round(s["duration"] * scale, 3)}
+                            for s in tr_spans]
+        else:
+            scaled_spans = tr_spans
+
+        srt_path = os.path.join(OUT, f"subs_{lang}.srt")
+        subs.build(scaled_spans, tr_parts, srt_path)
+        captions[lang] = srt_path
+
+        # ٤) تجميع صوت اللغة في MP3 واحد لرفعه يدويًا كمسار صوت ثانٍ
+        combined = _combine_audio(tr_parts, tr_total,
+                                   os.path.join(OUT, f"audio_{lang}.mp3"))
+        if combined:
+            audio_tracks[lang] = combined
+
+        # ٥) عنوان ووصف موطّنان
+        tr_meta = _translate.translate_meta(meta, lang, cfg)
+        if tr_meta:
+            localizations[lang] = tr_meta
+
+    _write(os.path.join(OUT, "localizations.json"),
+           {"localizations": localizations, "captions": captions,
+            "audio_tracks": audio_tracks})
+    return {"localizations": localizations, "captions": captions,
+            "audio_tracks": audio_tracks}
+
+
+def _combine_audio(parts, total, out_path):
+    """يرصّ أجزاء الصوت في ملفّ واحد بصمت الفواصل بينها."""
+    try:
+        from moviepy.editor import AudioFileClip, CompositeAudioClip
+        clips = []
+        t = 0.0
+        gap = max(0.3, (total - sum(p["duration"] for p in parts)) /
+                  max(len(parts) - 1, 1))
+        for p in parts:
+            if p["path"] and os.path.exists(p["path"]):
+                clips.append(AudioFileClip(p["path"]).set_start(t))
+            t += p["duration"] + gap
+        if not clips:
+            return None
+        CompositeAudioClip(clips).set_duration(total).write_audiofile(
+            out_path, logger=None)
+        return out_path
+    except Exception as e:
+        print(f"[multilingual] تعذّر جمع الصوت: {e}")
+        return None
 
 
 # ------------------------------------------------------------ مرحلة الرسم
@@ -183,6 +301,22 @@ def stage_assemble(cfg, publish):
     script = _read(os.path.join(OUT, "script.json"))
     source = script.get("source", "?")
 
+    # فصول الفيديو — تُلصق في مقدّمة الوصف (موضع يوتيوب المعتَمد)
+    chapters_text = chapters.build(spans, script)
+    if chapters_text:
+        meta["description"] = chapters_text + "\n\n" + meta["description"]
+        _write(os.path.join(OUT, "meta.json"), meta)
+        print(f"[chapters] أُضيفت {chapters_text.count(chr(10)) + 1} فصول "
+              f"إلى الوصف.")
+
+    # اللغات الإضافية: ترجمة + صوت + SRT + بيانات موطّنة
+    ml_result = {"localizations": {}, "captions": {}, "audio_tracks": {}}
+    try:
+        ml_result = stage_multilingual(cfg)
+    except Exception as e:
+        print(f"[multilingual] فشل عام ({type(e).__name__}: {e}) — "
+              f"سأكمل بالعربية وحدها.")
+
     report = [
         "## نتيجة الحلقة",
         f"- **العنوان:** {script.get('title', '')}",
@@ -190,6 +324,19 @@ def stage_assemble(cfg, publish):
         f"- **الطول:** {total / 60:.1f} دقيقة",
         f"- **مصدر السكريبت:** {'Gemini' if source == 'gemini' else 'احتياطي'}",
     ]
+    if chapters_text:
+        report.append(f"- **فصول الفيديو:** "
+                      f"{chapters_text.count(chr(10)) + 1} فصول في الوصف")
+    if ml_result["localizations"]:
+        report.append(f"- **عناوين موطّنة:** "
+                      f"{', '.join(sorted(ml_result['localizations']))}")
+    if ml_result["captions"]:
+        report.append(f"- **ترجمات:** "
+                      f"{', '.join(sorted(ml_result['captions']))}")
+    if ml_result["audio_tracks"]:
+        tracks = ", ".join(sorted(ml_result["audio_tracks"]))
+        report.append(f"- **مسارات صوت جاهزة (ارفعها يدويًا من Studio):** "
+                      f"{tracks}")
 
     shots = sum(1 for s in script.get("sections", []) if s.get("portrait_credit"))
     if shots:
@@ -217,10 +364,21 @@ def stage_assemble(cfg, publish):
     else:
         try:
             import youtube
-            res = youtube.upload(video_path, meta["title"], meta["description"],
-                                 meta["tags"], cfg)
+            default_lang = cfg.get("youtube", {}).get("default_language", "ar")
+            res = youtube.upload(
+                video_path, meta["title"], meta["description"], meta["tags"], cfg,
+                localizations=ml_result["localizations"] or None,
+                captions=ml_result["captions"] or None,
+                default_language=default_lang,
+            )
             report.append(f"- **رُفع:** {res['url']}")
             report.append(f"- **درجة الظهور:** `{res['privacy']}` — {res['note']}.")
+            if res.get("localizations"):
+                report.append(f"- **لغات العنوان في يوتيوب:** "
+                              f"{', '.join(res['localizations'])}")
+            if res.get("captions"):
+                report.append(f"- **ترجمات مرفوعة:** "
+                              f"{', '.join(res['captions'])}")
             if forced_private:
                 report.append("- خُفِّضت من `public` تلقائيًا لأن السكريبت احتياطي "
                               "(حلقة ضعيفة لا تُنشر للجمهور).")

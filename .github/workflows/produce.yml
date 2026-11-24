@@ -97,6 +97,13 @@ jobs:
 
       - name: التركيب (والنشر إن وُجدت أسرار يوتيوب)
         env:
+          # مفاتيح Gemini تلزم أيضًا هنا: مرحلة اللغات الإضافية تترجم
+          # عبر Gemini قبل الرفع (عناوين موطّنة + سكريبت إنجليزي).
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY2: ${{ secrets.GEMINI_API_KEY2 }}
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
@@ -112,4 +119,8 @@ jobs:
             output/video.mp4
             output/script.json
             output/meta.json
+            output/subs_*.srt
+            output/audio_*.mp3
+            output/localizations.json
+            output/script_*.json
           retention-days: 14
